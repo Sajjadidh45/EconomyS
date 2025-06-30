@@ -60,7 +60,7 @@ use onebone\economyapi\util\TransactionResult;
 use pocketmine\command\CommandSender;
 use pocketmine\event\Listener;
 use pocketmine\event\player\PlayerJoinEvent;
-use pocketmine\Player;
+use pocketmine\player\Player;
 use pocketmine\plugin\PluginBase;
 use pocketmine\utils\Config;
 use pocketmine\utils\Internet;
@@ -68,7 +68,7 @@ use pocketmine\utils\TextFormat;
 use Throwable;
 
 class EconomyAPI extends PluginBase implements Listener {
-	const API_VERSION = 4;
+	const API_VERSION = 5;
 	const PACKAGE_VERSION = "6.0";
 
 	/**
@@ -913,7 +913,7 @@ class EconomyAPI extends PluginBase implements Listener {
 		]);
 	}
 
-	public function onJoin(PlayerJoinEvent $event) {
+	public function onPlayerJoin(PlayerJoinEvent $event) {
 		$player = $event->getPlayer();
 
 		if(!$this->defaultCurrency->getBalanceRepository()->hasAccount($player)) {

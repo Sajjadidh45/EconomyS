@@ -25,9 +25,9 @@ use pocketmine\event\player\PlayerJoinEvent;
 use pocketmine\event\player\PlayerQuitEvent;
 use pocketmine\event\server\DataPacketSendEvent;
 use pocketmine\network\mcpe\protocol\AvailableCommandsPacket;
-use pocketmine\network\mcpe\protocol\types\CommandEnum;
-use pocketmine\network\mcpe\protocol\types\CommandParameter;
-use pocketmine\Player;
+use pocketmine\network\mcpe\protocol\types\command\CommandEnum;
+use pocketmine\network\mcpe\protocol\types\command\CommandParameter;
+use pocketmine\player\Player;
 
 class EventListener implements Listener {
 	/** @var EconomyAPI */
