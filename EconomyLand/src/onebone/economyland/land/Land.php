@@ -22,9 +22,9 @@ namespace onebone\economyland\land;
 
 use InvalidArgumentException;
 use onebone\economyland\EconomyLand;
-use pocketmine\world\World;
 use pocketmine\math\Vector2;
 use pocketmine\player\Player;
+use pocketmine\world\World;
 
 final class Land {
 	/** @var EconomyLand */
@@ -45,6 +45,8 @@ final class Land {
 	private $meta;
 	/** @var float */
 	private $lastAccess = 0;
+	/** @var Invitee[] */
+	private $invitees = [];
 
 	/**
 	 * @param EconomyLand $plugin
@@ -135,7 +137,7 @@ final class Land {
 		return $this->owner === $player;
 	}
 
-	public function setOwner(string $owner) {
+	public function setOwner(string $owner): void {
 		$this->lastAccess = microtime(true);
 		$this->owner = strtolower($owner);
 	}
@@ -145,7 +147,7 @@ final class Land {
 		return clone $this->option;
 	}
 
-	public function setOption(LandOption $option) {
+	public function setOption(LandOption $option): void {
 		$this->lastAccess = microtime(true);
 		$this->option = $option;
 	}
@@ -155,31 +157,70 @@ final class Land {
 		return clone $this->meta;
 	}
 
-	public function setMeta(LandMeta $meta) {
+	public function setMeta(LandMeta $meta): void {
 		$this->lastAccess = microtime(true);
 		$this->meta = $meta;
+	}
+
+	/**
+	 * @param Player|string $player
+	 * @return bool
+	 */
+	public function canInteract($player): bool {
+		if($player instanceof Player) {
+			$player = $player->getName();
+		}
+		$player = strtolower($player);
+
+		return isset($this->invitees[$player]);
+	}
+
+	/**
+	 * @param Player|string $player
+	 * @param int $permissions
+	 */
+	public function addInvitee($player, int $permissions = Invitee::PERMISSION_ALL): void {
+		if($player instanceof Player) {
+			$player = $player->getName();
+		}
+		$player = strtolower($player);
+
+		$this->invitees[$player] = new Invitee($player, $permissions);
+	}
+
+	/**
+	 * @param Player|string $player
+	 */
+	public function removeInvitee($player): void {
+		if($player instanceof Player) {
+			$player = $player->getName();
+		}
+		$player = strtolower($player);
+
+		unset($this->invitees[$player]);
+	}
+
+	/**
+	 * @return Invitee[]
+	 */
+	public function getInvitees(): array {
+		return $this->invitees;
 	}
 
 	public function getLastAccess(): float {
 		return $this->lastAccess;
 	}
 
-	public function checkCollision(Vector2 $start, Vector2 $end): bool {
-		$start = new Vector2(min($start->x, $end->x), min($start->y, $end->y));
-		$end = new Vector2(max($start->x, $end->x), max($start->y, $end->y));
-
-		return !($this->end->x < $start->x or $this->start->x > $end->x or $this->end->y < $start->y or $this->start->y > $end->y);
+	/**
+	 * @param int $x
+	 * @param int $z
+	 * @return bool
+	 */
+	public function contains(int $x, int $z): bool {
+		return $x >= $this->start->x && $x <= $this->end->x && $z >= $this->start->y && $z <= $this->end->y;
 	}
 
-	public function isInside(Vector2 $pos): bool {
-		return $pos->x >= $this->start->x and $pos->x <= $this->end->x and $pos->y >= $this->start->y and $pos->y <= $this->end->y;
-	}
-
-	public function getPrice(): float {
-		return $this->meta->getPrice();
-	}
-
-	public function getSize(): int {
+	public function getArea(): int {
 		return ($this->end->x - $this->start->x + 1) * ($this->end->y - $this->start->y + 1);
 	}
 }

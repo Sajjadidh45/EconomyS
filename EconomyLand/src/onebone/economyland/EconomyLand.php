@@ -26,22 +26,25 @@ use onebone\economyland\land\LandManager;
 use onebone\economyland\provider\Provider;
 use onebone\economyland\provider\YamlProvider;
 use onebone\economyland\task\LandUnloadTask;
+use pocketmine\event\Listener;
+use pocketmine\player\Player;
 use pocketmine\plugin\PluginBase;
 use pocketmine\utils\Config;
+use pocketmine\world\World;
 
-class EconomyLand extends PluginBase {
+class EconomyLand extends PluginBase implements Listener {
 	/** @var EconomyAPI */
 	private $api;
-	/** @var LandManager */
-	private $landManager;
 	/** @var Provider */
 	private $provider;
+	/** @var LandManager */
+	private $landManager;
 	/** @var PluginConfiguration */
 	private $pluginConfig;
 	/** @var Config */
 	private $lang;
 
-	public function onEnable() {
+	public function onEnable(): void {
 		if(!file_exists($this->getDataFolder())) {
 			mkdir($this->getDataFolder());
 		}
@@ -56,35 +59,40 @@ class EconomyLand extends PluginBase {
 		$this->saveDefaultConfig();
 		$this->saveResource("lang_en.json");
 
-		$this->pluginConfig = new PluginConfiguration($this);
-		$this->provider = new YamlProvider($this);
+		$this->pluginConfig = new PluginConfiguration($this->getConfig());
+		$this->lang = new Config($this->getDataFolder() . "lang_en.json", Config::JSON);
+
+		$this->provider = new YamlProvider($this->getDataFolder() . "lands.yml");
 		$this->landManager = new LandManager($this, $this->provider);
 
-		$langFile = $this->getDataFolder() . "lang_" . $this->pluginConfig->getLanguage() . ".json";
-		if(!file_exists($langFile)) {
-			$langFile = $this->getDataFolder() . "lang_en.json";
-		}
-		$this->lang = new Config($langFile, Config::JSON);
-
+		$this->getServer()->getPluginManager()->registerEvents($this, $this);
 		$this->getServer()->getPluginManager()->registerEvents(new EventListener($this), $this);
+
 		$this->getServer()->getCommandMap()->register("economyland", new LandCommand($this));
 
-		$this->getScheduler()->scheduleRepeatingTask(
-			new LandUnloadTask($this->landManager),
-			$this->pluginConfig->getLandUnloadTaskPeriod()
-		);
+		// Start land unload task
+		$this->getScheduler()->scheduleRepeatingTask(new LandUnloadTask($this->landManager), 20 * 60); // Every minute
+
+		$this->getLogger()->info("EconomyLand has been enabled");
+	}
+
+	public function onDisable(): void {
+		if($this->provider !== null) {
+			$this->provider->save();
+			$this->provider->close();
+		}
 	}
 
 	public function getAPI(): EconomyAPI {
 		return $this->api;
 	}
 
-	public function getLandManager(): LandManager {
-		return $this->landManager;
-	}
-
 	public function getProvider(): Provider {
 		return $this->provider;
+	}
+
+	public function getLandManager(): LandManager {
+		return $this->landManager;
 	}
 
 	public function getPluginConfig(): PluginConfiguration {
@@ -92,19 +100,13 @@ class EconomyLand extends PluginBase {
 	}
 
 	public function getMessage(string $key, array $params = []): string {
-		$message = $this->lang->getNested($key, $key);
+		$messages = $this->lang->getAll();
+		$message = $messages[$key] ?? $key;
 		
 		foreach($params as $i => $param) {
 			$message = str_replace("{%" . ($i + 1) . "}", $param, $message);
 		}
 		
 		return $message;
-	}
-
-	public function onDisable() {
-		if($this->provider !== null) {
-			$this->provider->save();
-			$this->provider->close();
-		}
 	}
 }

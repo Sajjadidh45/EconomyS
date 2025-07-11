@@ -23,11 +23,6 @@ namespace onebone\economyapi;
 use pocketmine\event\Listener;
 use pocketmine\event\player\PlayerJoinEvent;
 use pocketmine\event\player\PlayerQuitEvent;
-use pocketmine\event\server\DataPacketSendEvent;
-use pocketmine\network\mcpe\protocol\AvailableCommandsPacket;
-use pocketmine\network\mcpe\protocol\types\CommandEnum;
-use pocketmine\network\mcpe\protocol\types\CommandParameter;
-use pocketmine\player\Player;
 
 class EventListener implements Listener {
 	/** @var EconomyAPI */
@@ -37,144 +32,27 @@ class EventListener implements Listener {
 		$this->plugin = $plugin;
 	}
 
-	/*public function onDataPacketSend(DataPacketSendEvent $event) {
-		$pk = $event->getPackets()[0];
-		if(!$pk instanceof AvailableCommandsPacket) return;
-
-		$player = $event->getTargets()[0]->getPlayer();
-
-		$currencies = self::also(new CommandParameter(), function(CommandParameter $it) {
-			$it->paramName = 'currency ID';
-			$it->paramType = AvailableCommandsPacket::ARG_FLAG_VALID | AvailableCommandsPacket::ARG_TYPE_STRING;
-			$it->isOptional = true;
-			$it->enum = self::also(new CommandEnum(), function(CommandEnum $enum) {
-				$enum->enumName = 'currencies';
-				$enum->enumValues = array_keys($this->plugin->getCurrencies());
-			});
-		});
-		$amount = self::also(new CommandParameter(), function(CommandParameter $it) {
-			$it->paramName = 'amount';
-			$it->paramType = AvailableCommandsPacket::ARG_FLAG_VALID | AvailableCommandsPacket::ARG_TYPE_FLOAT;
-			$it->isOptional = false;
-		});
-		$players = self::also(new CommandParameter(), function(CommandParameter $it) {
-			$it->paramName = 'players';
-			$it->paramType = AvailableCommandsPacket::ARG_FLAG_VALID | AvailableCommandsPacket::ARG_TYPE_STRING;
-			$it->isOptional = false;
-			$it->enum = self::also(new CommandEnum(), function(CommandEnum $enum) {
-				$enum->enumName = 'players';
-				$enum->enumValues = array_map(function(Player $player) {
-					return $player->getName();
-				}, $this->plugin->getServer()->getOnlinePlayers());
-			});
-		});
-
-		if(isset($pk->commandData['mymoney'])) {
-			$data = $pk->commandData['mymoney'];
-
-			$data->overloads = [[$currencies]];
-
-			$pk->commandData['mymoney'] = $data;
-		}
-
-		if(isset($pk->commandData['seemoney'])) {
-			$data = $pk->commandData['seemoney'];
-
-			$data->overloads = [[$players, $currencies]];
-
-			$pk->commandData['seemoney'] = $data;
-		}
-
-		foreach(['setmoney', 'givemoney', 'takemoney'] as $command) {
-			if(isset($pk->commandData[$command])) {
-				$data = $pk->commandData[$command];
-
-				$data->overloads = [[$players, $amount, $currencies]];
-
-				$pk->commandData[$command] = $data;
-			}
-		}
-
-		if(isset($pk->commandData['pay'])) {
-			$data = $pk->commandData['pay'];
-
-			$data->overloads = [
-				[
-					self::also(new CommandParameter(), function(CommandParameter $it) use ($player) {
-						$it->paramName = 'target';
-						$it->paramType = AvailableCommandsPacket::ARG_FLAG_VALID | AvailableCommandsPacket::ARG_TYPE_STRING;
-						$it->isOptional = false;
-						$it->enum = self::also(new CommandEnum(), function(CommandEnum $enum) use ($player) {
-							$enum->enumName = 'target';
-							$enum->enumValues = array_filter(array_map(function(Player $player){
-								return $player->getName();
-							}, $this->plugin->getServer()->getOnlinePlayers()), function($p) use ($player) {
-								return $player->getName() !== $p;
-							});
-						});
-					}),
-					$amount, $currencies
-				]
-			];
-
-			$pk->commandData['pay'] = $data;
-		}
-
-		if(isset($pk->commandData['economy'])) {
-			$data = $pk->commandData['economy'];
-
-			$data->overloads = [
-				[
-					self::also(new CommandParameter(), function(CommandParameter $it) {
-						$it->paramName = 'property';
-						$it->paramType = AvailableCommandsPacket::ARG_FLAG_VALID | AvailableCommandsPacket::ARG_TYPE_STRING;
-						$it->isOptional = false;
-						$it->enum = self::also(new CommandEnum(), function(CommandEnum $enum) {
-							$enum->enumName = 'currency';
-							$enum->enumValues = ['currency'];
-						});
-					}),
-					$currencies
-				],
-				[
-					self::also(new CommandParameter(), function(CommandParameter $it) {
-						$it->paramName = 'property';
-						$it->paramType = AvailableCommandsPacket::ARG_FLAG_VALID | AvailableCommandsPacket::ARG_TYPE_STRING;
-						$it->isOptional = false;
-						$it->enum = self::also(new CommandEnum(), function(CommandEnum $enum) {
-							$enum->enumName = 'language';
-							$enum->enumValues = ['language'];
-						});
-					}),
-					self::also(new CommandParameter(), function(CommandParameter $it) {
-						$it->paramName = 'language';
-						$it->paramType = AvailableCommandsPacket::ARG_FLAG_VALID | AvailableCommandsPacket::ARG_TYPE_STRING;
-						$it->isOptional = false;
-						$it->enum = self::also(new CommandEnum(), function(CommandEnum $enum) {
-							$enum->enumName = 'languages';
-							$enum->enumValues = $this->plugin->getLanguages();
-						});
-					})
-				]
-			];
-
-			$pk->commandData['economy'] = $data;
-		}
-	}*/
-
-	/** @noinspection PhpUnusedParameterInspection */
-	/*public function onPlayerJoin(PlayerJoinEvent $_) {
+	/**
+	 * @param PlayerJoinEvent $event
+	 * @priority MONITOR
+	 * @ignoreCancelled true
+	 */
+	public function onPlayerJoin(PlayerJoinEvent $event): void {
 		foreach($this->plugin->getServer()->getOnlinePlayers() as $player) {
 			$player->getNetworkSession()->syncAvailableCommands();
 		}
-	}*/
+	}
 
-	/** @noinspection PhpUnusedParameterInspection */
-	/*public function onPlayerQuit(PlayerQuitEvent $_) {
+	/**
+	 * @param PlayerQuitEvent $event
+	 * @priority MONITOR
+	 * @ignoreCancelled true
+	 */
+	public function onPlayerQuit(PlayerQuitEvent $event): void {
 		foreach($this->plugin->getServer()->getOnlinePlayers() as $player) {
 			$player->getNetworkSession()->syncAvailableCommands();
 		}
-	}*/
+	}
 
 	public static function also($object, $block) {
 		$block($object);

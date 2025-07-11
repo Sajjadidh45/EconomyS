@@ -1,21 +1,30 @@
 name: EconomyShop
 main: onebone\economyshop\EconomyShop
-version: "2.0.1"
-api: 5.0.0
-
-depend: [EconomyAPI]
+version: "2.0.0"
 author: onebone
+api: 5.0.0
+depend: [EconomyAPI]
 
 commands:
- shop:
-  description: EconomyShop command
-  usage: /shop
-  permission: economyshop.command.shop
+  shop:
+    description: "Shop management command"
+    usage: "/shop <create|remove>"
+    permission: economyshop.command
+
 permissions:
- economyshop.command:
-  description: Allows player to use all of shop command
-  default: op
-  children:
-   economyshop.command.shop:
-    description: Allows player to use /shop command
-    default: true
+  economyshop:
+    default: op
+    description: "Allows access to all EconomyShop features"
+    children:
+      economyshop.command:
+        default: true
+        description: "Allows use of shop command"
+      economyshop.create:
+        default: true
+        description: "Allows creating shops"
+      economyshop.remove:
+        default: true
+        description: "Allows removing own shops"
+      economyshop.admin:
+        default: op
+        description: "Allows removing any shop"

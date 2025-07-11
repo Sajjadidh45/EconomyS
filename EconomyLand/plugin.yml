@@ -1,21 +1,27 @@
 name: EconomyLand
 main: onebone\economyland\EconomyLand
-version: "2.0.1"
-api: 5.0.0
-
-depend: [EconomyAPI]
+version: "2.0.0"
 author: onebone
+api: 5.0.0
+depend: [EconomyAPI]
 
 commands:
- land:
-  description: EconomyLand command
-  usage: /land
-  permission: economyland.command.land
+  land:
+    description: "Land management command"
+    usage: "/land <buy|here|list|invite|move|option|pos1|pos2>"
+    permission: economyland.command
+
 permissions:
- economyland.command:
-  description: Allows player to use all of land command
-  default: op
-  children:
-   economyland.command.land:
-    description: Allows player to use /land command
-    default: true
+  economyland:
+    default: op
+    description: "Allows access to all EconomyLand features"
+    children:
+      economyland.command:
+        default: true
+        description: "Allows use of land command"
+      economyland.buy:
+        default: true
+        description: "Allows buying land"
+      economyland.admin:
+        default: op
+        description: "Allows administrative land management"

@@ -67,7 +67,7 @@ use pocketmine\utils\TextFormat;
 use Throwable;
 
 class EconomyAPI extends PluginBase implements Listener {
-	const API_VERSION = 4;
+	const API_VERSION = 5;
 	const PACKAGE_VERSION = "6.0";
 
 	/**
@@ -117,6 +117,101 @@ class EconomyAPI extends PluginBase implements Listener {
 	const USER_DEFINED = 'user-define';
 
 	private $lang = [];
+
+	public function onLoad(): void {
+		self::$instance = $this;
+	}
+
+	public function onEnable(): void {
+		if(!file_exists($this->getDataFolder())) {
+			mkdir($this->getDataFolder());
+		}
+
+		$this->saveDefaultConfig();
+		$this->saveResource("lang_en.json");
+
+		$this->pluginConfig = new PluginConfig($this->getConfig());
+
+		// Load language files
+		$this->loadLanguages();
+
+		// Initialize providers
+		$this->initializeProviders();
+
+		// Initialize currencies
+		$this->initializeCurrencies();
+
+		// Register events
+		$this->getServer()->getPluginManager()->registerEvents($this, $this);
+		$this->getServer()->getPluginManager()->registerEvents(new EventListener($this), $this);
+
+		// Register commands
+		$this->registerCommands();
+
+		// Start save task
+		$this->getScheduler()->scheduleRepeatingTask(new SaveTask($this), $this->pluginConfig->getSaveInterval() * 20);
+
+		$this->getLogger()->info("EconomyAPI has been enabled");
+	}
+
+	public function onDisable(): void {
+		if($this->provider instanceof Provider) {
+			$this->provider->save();
+			$this->provider->close();
+		}
+	}
+
+	private function loadLanguages(): void {
+		$languages = ["ch", "cs", "de", "en", "fr", "id", "it", "ja", "ko", "nl", "ru", "zh"];
+		
+		foreach($languages as $lang) {
+			$file = $this->getDataFolder() . "lang_" . $lang . ".json";
+			if(file_exists($file)) {
+				$this->lang[$lang] = json_decode(file_get_contents($file), true);
+			}
+		}
+	}
+
+	private function initializeProviders(): void {
+		$provider = strtolower($this->pluginConfig->getProvider());
+		
+		switch($provider) {
+			case "yaml":
+				$this->provider = new YamlUserProvider($this->getDataFolder() . "user.yml");
+				break;
+			case "mysql":
+				// MySQL provider initialization
+				$this->provider = new DummyUserProvider(); // Fallback
+				break;
+			default:
+				$this->provider = new DummyUserProvider();
+				break;
+		}
+	}
+
+	private function initializeCurrencies(): void {
+		// Initialize default currency
+		$defaultCurrency = new CurrencyDollar();
+		$this->defaultCurrency = new CurrencyHolder("dollar", $defaultCurrency, null, null, null);
+		$this->currencies["dollar"] = $this->defaultCurrency;
+
+		// Initialize currency selector
+		$this->currencySelector = new SimpleCurrencySelector($this);
+	}
+
+	private function registerCommands(): void {
+		$commandMap = $this->getServer()->getCommandMap();
+		
+		$commandMap->register("economyapi", new EconomyCommand($this));
+		$commandMap->register("economyapi", new GiveMoneyCommand($this));
+		$commandMap->register("economyapi", new MyMoneyCommand($this));
+		$commandMap->register("economyapi", new MyStatusCommand($this));
+		$commandMap->register("economyapi", new PayCommand($this));
+		$commandMap->register("economyapi", new SeeMoneyCommand($this));
+		$commandMap->register("economyapi", new SetMoneyCommand($this));
+		$commandMap->register("economyapi", new TakeMoneyCommand($this));
+		$commandMap->register("economyapi", new TopMoneyCommand($this));
+	}
 
 	/**
 	 * Returns instance of EconomyAPI. Should be called after onLoad() phase.
@@ -330,6 +425,70 @@ class EconomyAPI extends PluginBase implements Listener {
 		}
 
 		return false;
+	}
+
+	/**
+	 * @param string $id
+	 * @return Currency|null
+	 */
+	public function getCurrency(string $id): ?Currency {
+		return isset($this->currencies[$id]) ? $this->currencies[$id]->getCurrency() : null;
+	}
+
+	/**
+	 * @param Currency $currency
+	 * @return string|null
+	 */
+	public function getCurrencyId(Currency $currency): ?string {
+		foreach($this->currencies as $id => $holder) {
+			if($holder->getCurrency() === $currency) {
+				return $id;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * @param Currency|null $currency
+	 * @return CurrencyHolder|null
+	 */
+	public function getCurrencyHolder(?Currency $currency): ?CurrencyHolder {
+		if($currency === null) {
+			return $this->defaultCurrency;
+		}
+
+		foreach($this->currencies as $holder) {
+			if($holder->getCurrency() === $currency) {
+				return $holder;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * @param Currency|null $currency
+	 * @param Player|string|null $player
+	 * @return CurrencyHolder
+	 */
+	private function findCurrencyHolder(?Currency $currency, $player): CurrencyHolder {
+		if($currency !== null) {
+			$holder = $this->getCurrencyHolder($currency);
+			if($holder !== null) {
+				return $holder;
+			}
+		}
+
+		if($player !== null) {
+			$preferred = $this->getPlayerPreferredCurrency($player, true);
+			if($preferred !== null) {
+				$holder = $this->getCurrencyHolder($preferred);
+				if($holder !== null) {
+					return $holder;
+				}
+			}
+		}
+
+		return $this->defaultCurrency;
 	}
 
 	/**
@@ -602,4 +761,27 @@ class EconomyAPI extends PluginBase implements Listener {
 				}
 			}
 
-			$ev = new CreateAccountEvent($this,
+			$ev = new CreateAccountEvent($this, $player, $holder->getCurrency(), $defaultMoney, $issuer);
+			$ev->call();
+			if($ev->isCancelled()) {
+				return false;
+			}
+
+			return $holder->getBalanceRepository()->createAccount($player, $defaultMoney);
+		}
+		return false;
+	}
+
+	/**
+	 * @param PlayerJoinEvent $event
+	 * @priority MONITOR
+	 * @ignoreCancelled true
+	 */
+	public function onPlayerJoin(PlayerJoinEvent $event): void {
+		$player = $event->getPlayer();
+		
+		if(!$this->hasAccount($player)) {
+			$this->createAccount($player);
+		}
+	}
+}

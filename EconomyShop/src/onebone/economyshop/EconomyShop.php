@@ -35,15 +35,14 @@ use pocketmine\event\Listener;
 use pocketmine\event\player\PlayerInteractEvent;
 use pocketmine\event\player\PlayerJoinEvent;
 use pocketmine\item\Item;
+use pocketmine\item\StringToItemParser;
 use pocketmine\world\Position;
 use pocketmine\math\Vector3;
 use pocketmine\player\Player;
-use pocketmine\item\StringToItemParser;
 use pocketmine\plugin\PluginBase;
-use pocketmine\utils\TextFormat;
 use pocketmine\utils\Config;
-use pocketmine\block\tile\Sign;
-use pocketmine\block\utils\SignText;
+use pocketmine\utils\TextFormat;
+use pocketmine\world\World;
 
 class EconomyShop extends PluginBase implements Listener {
 	/** @var EconomyAPI */
@@ -55,7 +54,7 @@ class EconomyShop extends PluginBase implements Listener {
 	/** @var Config */
 	private $lang;
 
-	public function onEnable() {
+	public function onEnable(): void {
 		if(!file_exists($this->getDataFolder())) {
 			mkdir($this->getDataFolder());
 		}
@@ -86,171 +85,226 @@ class EconomyShop extends PluginBase implements Listener {
 
 			$this->displayers[] = new ItemDisplayer($pos, $item, $pos);
 		}
+
+		$this->getLogger()->info("EconomyShop has been enabled");
 	}
 
-	public function onJoin(PlayerJoinEvent $event) {
-		$player = $event->getPlayer();
+	public function onDisable(): void {
 		foreach($this->displayers as $displayer) {
-			$displayer->spawnTo($player);
+			$displayer->despawnFromAll();
+		}
+		$this->provider->save();
+	}
+
+	/**
+	 * @param PlayerJoinEvent $event
+	 * @priority MONITOR
+	 * @ignoreCancelled true
+	 */
+	public function onPlayerJoin(PlayerJoinEvent $event): void {
+		foreach($this->displayers as $displayer) {
+			$displayer->spawnTo($event->getPlayer());
+		}
+	}
+
+	/**
+	 * @param BlockBreakEvent $event
+	 * @priority HIGHEST
+	 * @ignoreCancelled true
+	 */
+	public function onBlockBreak(BlockBreakEvent $event): void {
+		$player = $event->getPlayer();
+		$block = $event->getBlock();
+
+		if($this->provider->shopExists($block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName())) {
+			$shop = $this->provider->getShop($block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName());
+			
+			if($shop["owner"] !== strtolower($player->getName()) && !$player->hasPermission("economyshop.admin")) {
+				$player->sendMessage($this->getMessage("shop-break-not-owner", $player->getName()));
+				$event->cancel();
+				return;
+			}
+
+			$this->provider->removeShop($block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName());
+			
+			// Remove displayer
+			foreach($this->displayers as $key => $displayer) {
+				if($displayer->getLinked()->equals($block->getPosition())) {
+					$displayer->despawnFromAll();
+					unset($this->displayers[$key]);
+					break;
+				}
+			}
+
+			$player->sendMessage($this->getMessage("shop-removed", $player->getName()));
+		}
+	}
+
+	/**
+	 * @param PlayerInteractEvent $event
+	 * @priority HIGHEST
+	 * @ignoreCancelled true
+	 */
+	public function onPlayerInteract(PlayerInteractEvent $event): void {
+		$player = $event->getPlayer();
+		$block = $event->getBlock();
+
+		if($this->provider->shopExists($block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName())) {
+			$shop = $this->provider->getShop($block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName());
+			
+			$item = StringToItemParser::getInstance()->parse($shop["item"]);
+			if($item === null) {
+				$player->sendMessage($this->getMessage("invalid-item", $player->getName()));
+				return;
+			}
+
+			$price = $shop["price"];
+			$stock = $shop["stock"];
+
+			if($stock <= 0) {
+				$player->sendMessage($this->getMessage("shop-out-of-stock", $player->getName()));
+				return;
+			}
+
+			if($this->api->myMoney($player) < $price) {
+				$player->sendMessage($this->getMessage("not-enough-money", $player->getName(), [$price]));
+				return;
+			}
+
+			$ev = new ShopTransactionEvent($this, $player, $shop, $item, $price);
+			$ev->call();
+			if($ev->isCancelled()) {
+				return;
+			}
+
+			$this->api->reduceMoney($player, $price);
+			$this->api->addMoney($shop["owner"], $price);
+
+			$player->getInventory()->addItem($item);
+			$this->provider->setStock($block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName(), $stock - 1);
+
+			$player->sendMessage($this->getMessage("shop-bought", $player->getName(), [$item->getName(), $price]));
 		}
 	}
 
 	public function onCommand(CommandSender $sender, Command $command, string $label, array $args): bool {
-		switch($command->getName()) {
-			case "shop":
-				if(!$sender instanceof Player) {
-					$sender->sendMessage(TextFormat::RED . "Please run this command in-game.");
-					return false;
-				}
+		if($command->getName() === "shop") {
+			if(!$sender instanceof Player) {
+				$sender->sendMessage(TextFormat::RED . "Please run this command in-game.");
+				return true;
+			}
 
-				if(!isset($args[0])) {
+			if(!isset($args[0])) {
+				$sender->sendMessage(TextFormat::RED . "Usage: /shop <create|remove>");
+				return true;
+			}
+
+			switch(strtolower($args[0])) {
+				case "create":
+					if(!$sender->hasPermission("economyshop.create")) {
+						$sender->sendMessage(TextFormat::RED . "You don't have permission to create shops.");
+						return true;
+					}
+
+					if(!isset($args[1]) || !isset($args[2]) || !isset($args[3])) {
+						$sender->sendMessage(TextFormat::RED . "Usage: /shop create <item> <price> <stock>");
+						return true;
+					}
+
+					$item = StringToItemParser::getInstance()->parse($args[1]);
+					if($item === null) {
+						$sender->sendMessage(TextFormat::RED . "Invalid item: " . $args[1]);
+						return true;
+					}
+
+					$price = (float) $args[2];
+					$stock = (int) $args[3];
+
+					if($price <= 0 || $stock <= 0) {
+						$sender->sendMessage(TextFormat::RED . "Price and stock must be positive numbers.");
+						return true;
+					}
+
+					$block = $sender->getTargetBlock(5);
+					if($block === null) {
+						$sender->sendMessage(TextFormat::RED . "You must be looking at a block.");
+						return true;
+					}
+
+					if($this->provider->shopExists($block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName())) {
+						$sender->sendMessage(TextFormat::RED . "A shop already exists at this location.");
+						return true;
+					}
+
+					$ev = new ShopCreationEvent($this, $sender, $block->getPosition(), $item, $price, $stock);
+					$ev->call();
+					if($ev->isCancelled()) {
+						return true;
+					}
+
+					$this->provider->addShop($sender->getName(), $item->__toString(), $price, $stock, $block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName());
+					
+					$displayer = new ItemDisplayer($block->getPosition()->add(0, 1, 0), $item, $block->getPosition());
+					$displayer->spawnToAll($block->getPosition()->getWorld());
+					$this->displayers[] = $displayer;
+
+					$sender->sendMessage($this->getMessage("shop-created", $sender->getName(), [$item->getName(), $price, $stock]));
+					break;
+
+				case "remove":
+					if(!$sender->hasPermission("economyshop.remove")) {
+						$sender->sendMessage(TextFormat::RED . "You don't have permission to remove shops.");
+						return true;
+					}
+
+					$block = $sender->getTargetBlock(5);
+					if($block === null) {
+						$sender->sendMessage(TextFormat::RED . "You must be looking at a block.");
+						return true;
+					}
+
+					if(!$this->provider->shopExists($block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName())) {
+						$sender->sendMessage(TextFormat::RED . "No shop exists at this location.");
+						return true;
+					}
+
+					$shop = $this->provider->getShop($block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName());
+					
+					if($shop["owner"] !== strtolower($sender->getName()) && !$sender->hasPermission("economyshop.admin")) {
+						$sender->sendMessage(TextFormat::RED . "You can only remove your own shops.");
+						return true;
+					}
+
+					$this->provider->removeShop($block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName());
+					
+					// Remove displayer
+					foreach($this->displayers as $key => $displayer) {
+						if($displayer->getLinked()->equals($block->getPosition())) {
+							$displayer->despawnFromAll();
+							unset($this->displayers[$key]);
+							break;
+						}
+					}
+
+					$sender->sendMessage($this->getMessage("shop-removed", $sender->getName()));
+					break;
+
+				default:
 					$sender->sendMessage(TextFormat::RED . "Usage: /shop <create|remove>");
-					return false;
-				}
-
-				switch(strtolower($args[0])) {
-					case "create":
-					case "c":
-						if(!$sender->hasPermission("economyshop.command.shop.create")) {
-							$sender->sendMessage(TextFormat::RED . "You don't have permission to create shops.");
-							return false;
-						}
-
-						if(!isset($args[1]) or !isset($args[2]) or !isset($args[3])) {
-							$sender->sendMessage(TextFormat::RED . "Usage: /shop create <item> <price> <amount>");
-							return false;
-						}
-
-						$item = StringToItemParser::getInstance()->parse($args[1]);
-						if($item === null) {
-							$sender->sendMessage(TextFormat::RED . "Invalid item: " . $args[1]);
-							return false;
-						}
-
-						if(!is_numeric($args[2]) or $args[2] < 0) {
-							$sender->sendMessage(TextFormat::RED . "Price must be a positive number.");
-							return false;
-						}
-
-						if(!is_numeric($args[3]) or $args[3] < 1) {
-							$sender->sendMessage(TextFormat::RED . "Amount must be a positive number.");
-							return false;
-						}
-
-						$price = (float) $args[2];
-						$amount = (int) $args[3];
-
-						$pos = $sender->getPosition();
-						$shop = [
-							"x" => $pos->getFloorX(),
-							"y" => $pos->getFloorY(),
-							"z" => $pos->getFloorZ(),
-							"level" => $pos->getWorld()->getFolderName(),
-							"item" => $args[1],
-							"price" => $price,
-							"amount" => $amount,
-							"creator" => $sender->getName()
-						];
-
-						$event = new ShopCreationEvent($this, $shop, $sender);
-						$event->call();
-
-						if($event->isCancelled()) {
-							return false;
-						}
-
-						$this->provider->addShop($pos, $shop);
-						$this->displayers[] = new ItemDisplayer($pos, $item, $pos);
-
-						$sender->sendMessage(TextFormat::GREEN . "Shop created successfully!");
-						return true;
-
-					case "remove":
-					case "r":
-						if(!$sender->hasPermission("economyshop.command.shop.remove")) {
-							$sender->sendMessage(TextFormat::RED . "You don't have permission to remove shops.");
-							return false;
-						}
-
-						$pos = $sender->getPosition();
-						$shop = $this->provider->getShop($pos);
-
-						if($shop === null) {
-							$sender->sendMessage(TextFormat::RED . "No shop found at this location.");
-							return false;
-						}
-
-						if($shop["creator"] !== $sender->getName() and !$sender->hasPermission("economyshop.admin")) {
-							$sender->sendMessage(TextFormat::RED . "You can only remove your own shops.");
-							return false;
-						}
-
-						$this->provider->removeShop($pos);
-						$sender->sendMessage(TextFormat::GREEN . "Shop removed successfully!");
-						return true;
-				}
-				break;
+					break;
+			}
+			return true;
 		}
 		return false;
 	}
 
-	public function onInteract(PlayerInteractEvent $event) {
-		$player = $event->getPlayer();
-		$block = $event->getBlock();
-		$pos = $block->getPosition();
-
-		$shop = $this->provider->getShop($pos);
-		if($shop === null) return;
-
-		$event->cancel();
-
-		$item = StringToItemParser::getInstance()->parse($shop["item"]);
-		if($item === null) return;
-
-		$item->setCount($shop["amount"]);
-
-		if($this->api->myMoney($player) < $shop["price"]) {
-			$player->sendMessage(TextFormat::RED . "You don't have enough money!");
-			return;
+	private function getMessage(string $key, string $player, array $params = []): string {
+		$message = $this->lang->get($key, $key);
+		
+		foreach($params as $i => $param) {
+			$message = str_replace("{%" . ($i + 1) . "}", $param, $message);
 		}
-
-		if(!$player->getInventory()->canAddItem($item)) {
-			$player->sendMessage(TextFormat::RED . "Your inventory is full!");
-			return;
-		}
-
-		$transactionEvent = new ShopTransactionEvent($this, $shop, $player, $item, $shop["price"]);
-		$transactionEvent->call();
-
-		if($transactionEvent->isCancelled()) {
-			return;
-		}
-
-		$this->api->reduceMoney($player, $shop["price"]);
-		$player->getInventory()->addItem($item);
-
-		$player->sendMessage(TextFormat::GREEN . "You bought " . $item->getName() . " x" . $shop["amount"] . " for $" . $shop["price"]);
-	}
-
-	public function onBreak(BlockBreakEvent $event) {
-		$pos = $event->getBlock()->getPosition();
-		$shop = $this->provider->getShop($pos);
-
-		if($shop !== null) {
-			$player = $event->getPlayer();
-			if($shop["creator"] !== $player->getName() and !$player->hasPermission("economyshop.admin")) {
-				$event->cancel();
-				$player->sendMessage(TextFormat::RED . "You cannot break this shop!");
-			} else {
-				$this->provider->removeShop($pos);
-				$player->sendMessage(TextFormat::GREEN . "Shop removed!");
-			}
-		}
-	}
-
-	public function onDisable() {
-		if($this->provider !== null) {
-			$this->provider->save();
-		}
+		
+		return TextFormat::colorize($message);
 	}
 }

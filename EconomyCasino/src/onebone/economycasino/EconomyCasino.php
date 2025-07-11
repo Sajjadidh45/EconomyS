@@ -24,180 +24,168 @@ use onebone\economyapi\EconomyAPI;
 use pocketmine\command\Command;
 use pocketmine\command\CommandSender;
 use pocketmine\event\Listener;
-use pocketmine\event\player\PlayerQuitEvent;
 use pocketmine\player\Player;
 use pocketmine\plugin\PluginBase;
-use pocketmine\utils\Config;
+use pocketmine\utils\TextFormat;
 
 class EconomyCasino extends PluginBase implements Listener {
-	private $casino;
-	/**
-	 * @var EconomyAPI
-	 */
+	/** @var EconomyAPI */
 	private $api;
-	/**
-	 * @var Config
-	 */
-	private $config;
+	/** @var array */
+	private $games = [];
 
-	public function onEnable() {
-		@mkdir($this->getDataFolder());
+	public function onEnable(): void {
 		$this->api = EconomyAPI::getInstance();
-		$this->config = new Config($this->getDataFolder() . "config.yml", Config::YAML, array(
-				"jackpot-winning" => 1000,
-				"jackpot-money" => 5,
-				"max-game" => 10
-		));
-
-		$this->casino = array();
-
-		$this->getServer()->getPluginManager()->registerEvents($this, $this);
-	}
-
-	public function onDisable() {
-		$this->api = null;
-		$this->casino = array();
-	}
-
-	public function onQuitEvent(PlayerQuitEvent $event) {
-		$player = $event->getPlayer();
-
-		foreach($this->casino as $pl => $casino) {
-			if(isset($casino["players"][$pl])) {
-				unset($this->casino[$pl]["players"][$pl]);
-				$players = $this->casino[$pl]["players"];
-
-				$name = $player->getName();
-				foreach($players as $p => $v) {
-					$this->getServer()->getPlayerExact($p)->sendMessage("[EconomyCasino] " . $name . " left the casino game.");
-				}
-				break;
-			}
+		if($this->api === null) {
+			$this->getLogger()->critical("EconomyAPI plugin not found!");
+			$this->getServer()->getPluginManager()->disablePlugin($this);
+			return;
 		}
+
+		$this->saveDefaultConfig();
+		$this->getServer()->getPluginManager()->registerEvents($this, $this);
+
+		$this->getLogger()->info("EconomyCasino has been enabled");
 	}
 
 	public function onCommand(CommandSender $sender, Command $command, string $label, array $args): bool {
 		if($command->getName() === "casino") {
 			if(!$sender instanceof Player) {
-				$sender->sendMessage("Please run this command in-game.");
-				return false;
+				$sender->sendMessage(TextFormat::RED . "Please run this command in-game.");
+				return true;
 			}
 
 			if(!isset($args[0])) {
-				$sender->sendMessage("Usage: /casino <start|join|quit>");
-				return false;
+				$sender->sendMessage(TextFormat::RED . "Usage: /casino <dice|coin|lottery> <bet_amount>");
+				return true;
 			}
 
-			switch(strtolower($args[0])) {
-				case "start":
-					if(isset($this->casino[$sender->getName()])) {
-						$sender->sendMessage("[EconomyCasino] You are already in a casino game.");
-						return false;
-					}
+			$game = strtolower($args[0]);
+			$betAmount = isset($args[1]) ? (float) $args[1] : 0;
 
-					$this->casino[$sender->getName()] = [
-						"host" => $sender->getName(),
-						"players" => [$sender->getName() => true],
-						"started" => false
-					];
-
-					$sender->sendMessage("[EconomyCasino] Casino game started! Other players can join with /casino join " . $sender->getName());
-					return true;
-
-				case "join":
-					if(!isset($args[1])) {
-						$sender->sendMessage("Usage: /casino join <host>");
-						return false;
-					}
-
-					$host = $args[1];
-					if(!isset($this->casino[$host])) {
-						$sender->sendMessage("[EconomyCasino] Casino game not found.");
-						return false;
-					}
-
-					if($this->casino[$host]["started"]) {
-						$sender->sendMessage("[EconomyCasino] This game has already started.");
-						return false;
-					}
-
-					if(count($this->casino[$host]["players"]) >= $this->config->get("max-game")) {
-						$sender->sendMessage("[EconomyCasino] This game is full.");
-						return false;
-					}
-
-					$this->casino[$host]["players"][$sender->getName()] = true;
-					$sender->sendMessage("[EconomyCasino] You joined the casino game!");
-
-					foreach($this->casino[$host]["players"] as $playerName => $v) {
-						$player = $this->getServer()->getPlayerExact($playerName);
-						if($player !== null) {
-							$player->sendMessage("[EconomyCasino] " . $sender->getName() . " joined the game!");
-						}
-					}
-					return true;
-
-				case "quit":
-					$found = false;
-					foreach($this->casino as $host => $casino) {
-						if(isset($casino["players"][$sender->getName()])) {
-							unset($this->casino[$host]["players"][$sender->getName()]);
-							$found = true;
-
-							if(empty($this->casino[$host]["players"])) {
-								unset($this->casino[$host]);
-							} else {
-								foreach($this->casino[$host]["players"] as $playerName => $v) {
-									$player = $this->getServer()->getPlayerExact($playerName);
-									if($player !== null) {
-										$player->sendMessage("[EconomyCasino] " . $sender->getName() . " left the game!");
-									}
-								}
-							}
-							break;
-						}
-					}
-
-					if($found) {
-						$sender->sendMessage("[EconomyCasino] You left the casino game.");
-					} else {
-						$sender->sendMessage("[EconomyCasino] You are not in any casino game.");
-					}
-					return true;
-
-				case "play":
-					$found = false;
-					foreach($this->casino as $host => $casino) {
-						if(isset($casino["players"][$sender->getName()])) {
-							$found = true;
-							break;
-						}
-					}
-
-					if(!$found) {
-						$sender->sendMessage("[EconomyCasino] You are not in any casino game.");
-						return false;
-					}
-
-					$bet = $this->config->get("jackpot-money");
-					if($this->api->myMoney($sender) < $bet) {
-						$sender->sendMessage("[EconomyCasino] You need at least $" . $bet . " to play.");
-						return false;
-					}
-
-					$this->api->reduceMoney($sender, $bet);
-
-					$random = mt_rand(1, $this->config->get("jackpot-winning"));
-					if($random === 1) {
-						$winning = $bet * count($this->casino[$host]["players"]) * 10;
-						$this->api->addMoney($sender, $winning);
-						$sender->sendMessage("[EconomyCasino] JACKPOT! You won $" . $winning . "!");
-					} else {
-						$sender->sendMessage("[EconomyCasino] You lost $" . $bet . ". Better luck next time!");
-					}
-					return true;
+			if($betAmount <= 0) {
+				$sender->sendMessage(TextFormat::RED . "Bet amount must be positive!");
+				return true;
 			}
+
+			if($this->api->myMoney($sender) < $betAmount) {
+				$sender->sendMessage(TextFormat::RED . "You don't have enough money to place this bet!");
+				return true;
+			}
+
+			switch($game) {
+				case "dice":
+					$this->playDice($sender, $betAmount);
+					break;
+
+				case "coin":
+					$this->playCoinFlip($sender, $betAmount);
+					break;
+
+				case "lottery":
+					$this->playLottery($sender, $betAmount);
+					break;
+
+				default:
+					$sender->sendMessage(TextFormat::RED . "Available games: dice, coin, lottery");
+					break;
+			}
+
+			return true;
 		}
+
 		return false;
+	}
+
+	private function playDice(Player $player, float $betAmount): void {
+		$this->api->reduceMoney($player, $betAmount);
+
+		$playerRoll = mt_rand(1, 6);
+		$houseRoll = mt_rand(1, 6);
+
+		$player->sendMessage(TextFormat::YELLOW . "=== DICE GAME ===");
+		$player->sendMessage(TextFormat::AQUA . "Your roll: " . $playerRoll);
+		$player->sendMessage(TextFormat::AQUA . "House roll: " . $houseRoll);
+
+		if($playerRoll > $houseRoll) {
+			$winnings = $betAmount * 1.8;
+			$this->api->addMoney($player, $winnings);
+			$player->sendMessage(TextFormat::GREEN . "You won! Winnings: $" . $winnings);
+		} elseif($playerRoll === $houseRoll) {
+			$this->api->addMoney($player, $betAmount);
+			$player->sendMessage(TextFormat::YELLOW . "It's a tie! Your bet has been returned.");
+		} else {
+			$player->sendMessage(TextFormat::RED . "You lost! Better luck next time.");
+		}
+	}
+
+	private function playCoinFlip(Player $player, float $betAmount): void {
+		$this->api->reduceMoney($player, $betAmount);
+
+		$playerChoice = mt_rand(0, 1); // 0 = heads, 1 = tails
+		$result = mt_rand(0, 1);
+
+		$choiceText = $playerChoice === 0 ? "Heads" : "Tails";
+		$resultText = $result === 0 ? "Heads" : "Tails";
+
+		$player->sendMessage(TextFormat::YELLOW . "=== COIN FLIP ===");
+		$player->sendMessage(TextFormat::AQUA . "Your choice: " . $choiceText);
+		$player->sendMessage(TextFormat::AQUA . "Result: " . $resultText);
+
+		if($playerChoice === $result) {
+			$winnings = $betAmount * 2;
+			$this->api->addMoney($player, $winnings);
+			$player->sendMessage(TextFormat::GREEN . "You won! Winnings: $" . $winnings);
+		} else {
+			$player->sendMessage(TextFormat::RED . "You lost! Better luck next time.");
+		}
+	}
+
+	private function playLottery(Player $player, float $betAmount): void {
+		$this->api->reduceMoney($player, $betAmount);
+
+		$playerNumbers = [];
+		$winningNumbers = [];
+
+		// Generate player numbers
+		for($i = 0; $i < 3; $i++) {
+			$playerNumbers[] = mt_rand(1, 10);
+		}
+
+		// Generate winning numbers
+		for($i = 0; $i < 3; $i++) {
+			$winningNumbers[] = mt_rand(1, 10);
+		}
+
+		$matches = count(array_intersect($playerNumbers, $winningNumbers));
+
+		$player->sendMessage(TextFormat::YELLOW . "=== LOTTERY ===");
+		$player->sendMessage(TextFormat::AQUA . "Your numbers: " . implode(", ", $playerNumbers));
+		$player->sendMessage(TextFormat::AQUA . "Winning numbers: " . implode(", ", $winningNumbers));
+		$player->sendMessage(TextFormat::AQUA . "Matches: " . $matches);
+
+		switch($matches) {
+			case 3:
+				$winnings = $betAmount * 10;
+				$this->api->addMoney($player, $winnings);
+				$player->sendMessage(TextFormat::GREEN . "JACKPOT! All numbers match! Winnings: $" . $winnings);
+				break;
+
+			case 2:
+				$winnings = $betAmount * 3;
+				$this->api->addMoney($player, $winnings);
+				$player->sendMessage(TextFormat::GREEN . "Great! 2 numbers match! Winnings: $" . $winnings);
+				break;
+
+			case 1:
+				$winnings = $betAmount * 1.5;
+				$this->api->addMoney($player, $winnings);
+				$player->sendMessage(TextFormat::GREEN . "Good! 1 number matches! Winnings: $" . $winnings);
+				break;
+
+			default:
+				$player->sendMessage(TextFormat::RED . "No matches! Better luck next time.");
+				break;
+		}
 	}
 }

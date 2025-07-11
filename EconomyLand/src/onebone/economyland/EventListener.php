@@ -1,19 +1,33 @@
 <?php
 
+/*
+ * EconomyS, the massive economy plugin with many features for PocketMine-MP
+ * Copyright (C) 2013-2021  onebone <me@onebone.me>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 namespace onebone\economyland;
 
-use pocketmine\event\entity\EntityTeleportEvent;
-use pocketmine\event\inventory\InventoryPickupItemEvent;
+use onebone\economyland\land\LandOption;
+use pocketmine\event\block\BlockBreakEvent;
+use pocketmine\event\block\BlockPlaceEvent;
+use pocketmine\event\entity\EntityDamageByEntityEvent;
 use pocketmine\event\Listener;
 use pocketmine\event\player\PlayerInteractEvent;
-use pocketmine\event\player\PlayerMoveEvent;
-use pocketmine\event\server\DataPacketSendEvent;
-use pocketmine\player\inventory\PlayerInventory;
-use pocketmine\world\Position;
-use pocketmine\network\mcpe\protocol\AvailableCommandsPacket;
-use pocketmine\network\mcpe\protocol\types\CommandEnum;
-use pocketmine\network\mcpe\protocol\types\CommandParameter;
 use pocketmine\player\Player;
+use pocketmine\utils\TextFormat;
 
 class EventListener implements Listener {
 	/** @var EconomyLand */
@@ -23,225 +37,93 @@ class EventListener implements Listener {
 		$this->plugin = $plugin;
 	}
 
-	public function onPlayerMove(PlayerMoveEvent $event) {
-		if(!$this->canMove($event->getTo(), $event->getPlayer())) {
-			$event->setCancelled();
-		}
-	}
-
-	public function onPlayerTeleport(EntityTeleportEvent $event) {
-		$player = $event->getEntity();
-		if(!$player instanceof Player) return;
-
-		if(!$this->canMove($event->getTo(), $player)) {
-			$event->setCancelled();
-		}
-	}
-
-	private function canMove(Position $to, Player $player): bool {
-		$vec = $to->floor();
-
-		$lands = $this->plugin->getLandManager();
-		$land = $lands->getLandAt($vec->getX(), $vec->getZ(), $to->getWorld()->getFolderName());
-		if($land === null) return true;
-
-		$name = strtolower($player->getName());
-		if($land->getOwner() === $name) return true;
-
-		$option = $land->getOption();
-		if(!$option->isInvitee($player)) {
-			return $option->getAllowIn();
-		}
-
-		return true;
-	}
-
-	public function onPlayerInteract(PlayerInteractEvent $event) {
-		if($event->getAction() === PlayerInteractEvent::LEFT_CLICK_AIR
-		or $event->getAction() === PlayerInteractEvent::RIGHT_CLICK_AIR) return;
-
-		$pos = $event->getBlock()->getPosition()->floor();
+	/**
+	 * @param BlockBreakEvent $event
+	 * @priority HIGH
+	 * @ignoreCancelled true
+	 */
+	public function onBlockBreak(BlockBreakEvent $event): void {
 		$player = $event->getPlayer();
+		$block = $event->getBlock();
+		$pos = $block->getPosition();
 
-		$lands = $this->plugin->getLandManager();
-		$land = $lands->getLandAt($pos->getX(), $pos->getZ(), $player->getWorld()->getFolderName());
-		if($land === null) return;
-
-		$name = strtolower($player->getName());
-		$owner = $land->getOwner();
-		if($owner === $name) return;
-
-		$option = $land->getOption();
-		$invitee = $option->getInvitee($player);
-		if($invitee === null) {
-			if(!$option->getAllowTouch()) {
-				$player->sendMessage($this->plugin->getMessage('land-no-permission-touch', [$owner]));
-				$event->setCancelled();
-			}
-		}else{
-			if(!$invitee->getAllowTouch()) {
-				$player->sendMessage($this->plugin->getMessage('land-no-permission-touch', [$owner]));
-				$event->setCancelled();
+		$land = $this->plugin->getLandManager()->getLandByPosition($pos->getFloorX(), $pos->getFloorZ(), $pos->getWorld()->getFolderName());
+		
+		if($land !== null) {
+			if(!$land->isOwner($player) && !$land->canInteract($player)) {
+				if(!$land->getOption()->canBreak()) {
+					$player->sendMessage(TextFormat::RED . $this->plugin->getMessage("land-no-break"));
+					$event->cancel();
+				}
 			}
 		}
 	}
 
-	public function onPlayerPickup(InventoryPickupItemEvent $event) {
-		$inv = $event->getInventory();
-		if(!$inv instanceof PlayerInventory) return;
+	/**
+	 * @param BlockPlaceEvent $event
+	 * @priority HIGH
+	 * @ignoreCancelled true
+	 */
+	public function onBlockPlace(BlockPlaceEvent $event): void {
+		$player = $event->getPlayer();
+		$block = $event->getBlock();
+		$pos = $block->getPosition();
 
-		$player = $inv->getHolder();
-		$vec = $event->getItem()->getPosition()->floor();
-
-		$lands = $this->plugin->getLandManager();
-		$land = $lands->getLandAt($vec->getX(), $vec->getZ(), $player->getWorld()->getFolderName());
-		if($land === null) return;
-
-		$name = strtolower($player->getName());
-		if($land->getOwner() === $name) return;
-
-		$option = $land->getOption();
-		$invitee = $option->getInvitee($player);
-		if($invitee === null) {
-			$event->setCancelled(!$option->getAllowPickup());
-		}else{
-			$event->setCancelled(!$invitee->getAllowPickup());
+		$land = $this->plugin->getLandManager()->getLandByPosition($pos->getFloorX(), $pos->getFloorZ(), $pos->getWorld()->getFolderName());
+		
+		if($land !== null) {
+			if(!$land->isOwner($player) && !$land->canInteract($player)) {
+				if(!$land->getOption()->canPlace()) {
+					$player->sendMessage(TextFormat::RED . $this->plugin->getMessage("land-no-place"));
+					$event->cancel();
+				}
+			}
 		}
 	}
 
-	/*public function onDataPacketSend(DataPacketSendEvent $event) {
-		$pk = $event->getPacket();
-		if(!$pk instanceof AvailableCommandsPacket) return;
+	/**
+	 * @param PlayerInteractEvent $event
+	 * @priority HIGH
+	 * @ignoreCancelled true
+	 */
+	public function onPlayerInteract(PlayerInteractEvent $event): void {
 		$player = $event->getPlayer();
+		$block = $event->getBlock();
+		$pos = $block->getPosition();
 
-		if(!isset($pk->commandData['land'])) return;
-		$data = $pk->commandData['land'];
+		$land = $this->plugin->getLandManager()->getLandByPosition($pos->getFloorX(), $pos->getFloorZ(), $pos->getWorld()->getFolderName());
+		
+		if($land !== null) {
+			if(!$land->isOwner($player) && !$land->canInteract($player)) {
+				if(!$land->getOption()->canInteract()) {
+					$player->sendMessage(TextFormat::RED . $this->plugin->getMessage("land-no-interact"));
+					$event->cancel();
+				}
+			}
+		}
+	}
 
-		$data->overloads = [];
+	/**
+	 * @param EntityDamageByEntityEvent $event
+	 * @priority HIGH
+	 * @ignoreCancelled true
+	 */
+	public function onEntityDamage(EntityDamageByEntityEvent $event): void {
+		$entity = $event->getEntity();
+		$damager = $event->getDamager();
 
-		// land pos1, land pos2
-		$data->overloads[] = [
-			self::also(new CommandParameter(), function(CommandParameter $it) {
-				$it->paramType = AvailableCommandsPacket::ARG_TYPE_STRING;
-				$it->paramName = 'pos';
-				$it->isOptional = false;
-				$it->enum = self::also(new CommandEnum(), function(CommandEnum $enum) {
-					$enum->enumName = 'pos1|pos2';
-					$enum->enumValues = ['pos1', 'pos2'];
-				});
-			})
-		];
-
-		// land buy
-		$data->overloads[] = [
-			self::also(new CommandParameter(), function(CommandParameter $it) {
-				$it->paramType = AvailableCommandsPacket::ARG_TYPE_STRING;
-				$it->paramName = 'buy';
-				$it->isOptional = false;
-				$it->enum = self::also(new CommandEnum(), function(CommandEnum $enum) {
-					$enum->enumName = 'buy';
-					$enum->enumValues = ['buy'];
-				});
-			})
-		];
-
-		// land here
-		$data->overloads[] = [
-			self::also(new CommandParameter(), function(CommandParameter $it) {
-				$it->paramType = AvailableCommandsPacket::ARG_TYPE_STRING;
-				$it->paramName = 'here';
-				$it->isOptional = false;
-				$it->enum = self::also(new CommandEnum(), function(CommandEnum $enum) {
-					$enum->enumName = 'here';
-					$enum->enumValues = ['here'];
-				});
-			})
-		];
-
-		// land option
-		$data->overloads[] = [
-			self::also(new CommandParameter(), function(CommandParameter $it) {
-				$it->paramType = AvailableCommandsPacket::ARG_TYPE_STRING;
-				$it->paramName = 'option';
-				$it->isOptional = false;
-				$it->enum = self::also(new CommandEnum(), function(CommandEnum $enum) {
-					$enum->enumName = 'option';
-					$enum->enumValues = ['option'];
-				});
-			}),
-			$this->buildLandIdAutoComplete($player)
-		];
-
-		// land invite
-		$data->overloads[] = [
-			self::also(new CommandParameter(), function(CommandParameter $it) {
-				$it->paramType = AvailableCommandsPacket::ARG_TYPE_STRING;
-				$it->paramName = 'invite';
-				$it->isOptional = false;
-				$it->enum = self::also(new CommandEnum(), function(CommandEnum $enum) {
-					$enum->enumName = 'invite';
-					$enum->enumValues = ['invite'];
-				});
-			}),
-			$this->buildLandIdAutoComplete($player)
-		];
-
-		// land move
-		$data->overloads[] = [
-			self::also(new CommandParameter(), function(CommandParameter $it) {
-				$it->paramType = AvailableCommandsPacket::ARG_TYPE_STRING;
-				$it->paramName = 'move';
-				$it->isOptional = false;
-				$it->enum = self::also(new CommandEnum(), function(CommandEnum $enum) {
-					$enum->enumName = 'move';
-					$enum->enumValues = ['move'];
-				});
-			}),
-			$this->buildLandIdAutoComplete($player)
-		];
-
-		// land list
-		$data->overloads[] = [
-			self::also(new CommandParameter(), function(CommandParameter $it) {
-				$it->paramType = AvailableCommandsPacket::ARG_FLAG_VALID | AvailableCommandsPacket::ARG_TYPE_STRING;
-				$it->paramName = 'list';
-				$it->isOptional = false;
-				$it->enum = self::also(new CommandEnum(), function(CommandEnum $enum) {
-					$enum->enumName = 'list';
-					$enum->enumValues = ['list'];
-				});
-			}),
-			self::also(new CommandParameter(), function(CommandParameter $it) {
-				$it->paramType = AvailableCommandsPacket::ARG_FLAG_VALID | AvailableCommandsPacket::ARG_TYPE_STRING;
-				$it->paramName = 'owner';
-				$it->isOptional = true;
-			}),
-			self::also(new CommandParameter(), function(CommandParameter $it) {
-				$it->paramType = AvailableCommandsPacket::ARG_FLAG_VALID | AvailableCommandsPacket::ARG_TYPE_INT;
-				$it->paramName = 'page';
-				$it->isOptional = true;
-			})
-		];
-
-		$pk->commandData['land'] = $data;
-	}*/
-
-	/*private function buildLandIdAutoComplete(Player $player): CommandParameter {
-		return self::also(new CommandParameter(), function(CommandParameter $it) use ($player) {
-			$it->paramName = 'land ID';
-			$it->paramType = AvailableCommandsPacket::ARG_TYPE_STRING;
-			$it->isOptional = false;
-			$it->enum = self::also(new CommandEnum(), function(CommandEnum $enum) use ($player) {
-				$enum->enumName = 'land ID';
-				$enum->enumValues = array_map(function($val) {
-					return $val->getId();
-				}, $this->plugin->getLandManager()->getLandsByOwner($player->getName()));
-			});
-		});
-	}*/
-
-	public static function also($object, $callback) {
-		$callback($object);
-		return $object;
+		if($entity instanceof Player && $damager instanceof Player) {
+			$pos = $entity->getPosition();
+			$land = $this->plugin->getLandManager()->getLandByPosition($pos->getFloorX(), $pos->getFloorZ(), $pos->getWorld()->getFolderName());
+			
+			if($land !== null) {
+				if(!$land->isOwner($damager) && !$land->canInteract($damager)) {
+					if(!$land->getOption()->canPvP()) {
+						$damager->sendMessage(TextFormat::RED . $this->plugin->getMessage("land-no-pvp"));
+						$event->cancel();
+					}
+				}
+			}
+		}
 	}
 }

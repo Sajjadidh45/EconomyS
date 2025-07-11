@@ -1,21 +1,21 @@
 name: EconomyCasino
 main: onebone\economycasino\EconomyCasino
-version: "2.0.1"
-api: 5.0.0
-
-depend: [EconomyAPI]
+version: "2.0.0"
 author: onebone
+api: 5.0.0
+depend: [EconomyAPI]
 
 commands:
- casino:
-  description: EconomyCasino command
-  usage: /casino
-  permission: economycasino.command.casino
+  casino:
+    description: "Casino games command"
+    usage: "/casino <dice|coin|lottery> <bet_amount>"
+    permission: economycasino.command
+
 permissions:
- economycasino.command:
-  description: Allows player to use all of casino command
-  default: op
-  children:
-   economycasino.command.casino:
-    description: Allows player to use /casino command
-    default: true
+  economycasino:
+    default: op
+    description: "Allows access to all EconomyCasino features"
+    children:
+      economycasino.command:
+        default: true
+        description: "Allows use of casino command"

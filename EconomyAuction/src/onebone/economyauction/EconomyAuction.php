@@ -21,252 +21,281 @@
 namespace onebone\economyauction;
 
 use onebone\economyapi\EconomyAPI;
-use onebone\economyapi\event\CommandIssuer;
 use pocketmine\command\Command;
 use pocketmine\command\CommandSender;
+use pocketmine\event\Listener;
 use pocketmine\item\Item;
-use pocketmine\item\ItemFactory;
 use pocketmine\player\Player;
 use pocketmine\plugin\PluginBase;
+use pocketmine\utils\Config;
 use pocketmine\utils\TextFormat;
 
-class EconomyAuction extends PluginBase {
-	/*
-	@var int[] $auctions
-	key : player name
-	[0] : item
-	[1] : meta
-	[2] : count
-	[3] : start price
-	[4] : buying player
-	[5] : buying price
-	[6] : remain time
-	[7] : start time
-	[8] : schedule id
-	*/
-	private $auctions, $queue;
+class EconomyAuction extends PluginBase implements Listener {
+	/** @var EconomyAPI */
+	private $api;
+	/** @var array */
+	private $auctions = [];
+	/** @var Config */
+	private $config;
 
-	public function onEnable() {
+	public function onEnable(): void {
 		if(!file_exists($this->getDataFolder())) {
 			mkdir($this->getDataFolder());
 		}
+
+		$this->api = EconomyAPI::getInstance();
+		if($this->api === null) {
+			$this->getLogger()->critical("EconomyAPI plugin not found!");
+			$this->getServer()->getPluginManager()->disablePlugin($this);
+			return;
+		}
+
 		$this->saveDefaultConfig();
-		if(!is_file($this->getDataFolder() . "Auctions.dat")) {
-			file_put_contents($this->getDataFolder() . "Auctions.dat", serialize(array()));
-		}
-		if(!is_file($this->getDataFolder() . "QuitQueue.dat")) {
-			file_put_contents($this->getDataFolder() . "QuitQueue.dat", serialize(array()));
-		}
-		$this->auctions = unserialize(file_get_contents($this->getDataFolder() . "Auctions.dat"));
-		$this->queue = unserialize(file_get_contents($this->getDataFolder() . "QuitQueue.dat"));
+		$this->saveResource("config.yml");
 
-		foreach($this->auctions as $player => $data) {
-			if(isset($this->auctions[$player][6])) {
-				$id = $this->getScheduler()->scheduleDelayedTask(new QuitAuctionTask($this, $player), $this->auctions[$player][6])->getHandler()->getTaskId();
-				$this->auctions[$player][7] = time();
-				$this->auctions[$player][8] = $id;
-			}
-		}
+		$this->config = $this->getConfig();
+
+		$this->getServer()->getPluginManager()->registerEvents($this, $this);
+
+		$this->getLogger()->info("EconomyAuction has been enabled");
 	}
 
-	public function onDisable() {
-		$now = time();
-		foreach($this->auctions as $player => $data) {
-			if(isset($this->auctions[$player][6])) {
-				$this->auctions[$player][6] -= ($now - $this->auctions[$player][7]);
-			}
-		}
-		file_put_contents($this->getDataFolder() . "Auctions.dat", serialize($this->auctions));
-		file_put_contents($this->getDataFolder() . "QuitQueue.dat", serialize($this->queue));
-	}
-
-	public function onCommand(CommandSender $sender, Command $command, string $label, array $params): bool {
-		switch ($command->getName()) {
-			case "auction":
-				$sub = array_shift($params);
-				switch ($sub) {
-					case "start":
-						if(!$sender instanceof Player) {
-							$sender->sendMessage("Please run this command in-game.");
-							break;
-						}
-						if(isset($this->auctions[$sender->getName()])) {
-							$sender->sendMessage("You already have ongoing auction");
-							break;
-						}
-						$tax = $this->getConfig()->get("auction-tax");
-						if($tax > EconomyAPI::getInstance()->myMoney($sender)) {
-							$sender->sendMessage("You don't have enough money to start auction. Auction tax : " . $tax);
-							break;
-						}
-
-						$item = array_shift($params);
-						$count = array_shift($params);
-						$startPrice = array_shift($params);
-						if(trim($item) === "" or !is_numeric($count) or !is_numeric($count)) {
-							$sender->sendMessage("Usage: /auction start <item> <count> <start price>");
-							break;
-						}
-
-						$count = (int) $count;
-						$itemData = explode(":", $item);
-						$item = ItemFactory::getInstance()->get((int)$itemData[0], (int)($itemData[1] ?? 0), 1);
-
-						$cnt = 0;
-						foreach($sender->getInventory()->getContents() as $i) {
-							if($i->equals($item)) {
-								$cnt += $i->getCount();
-								if($count <= $cnt) {
-									break;
-								}
-							}
-						}
-						if($count <= $cnt) {
-							$item->setCount($count);
-							$sender->getInventory()->removeItem($item);
-
-							$this->auctions[strtolower($sender->getName())] = array(
-									$item->getId(), $item->getMeta(), $count, (float) $startPrice, null, (float) $startPrice, null, null
-							);
-							$this->getServer()->broadcastMessage(TextFormat::GREEN . $sender->getName() . TextFormat::RESET . "'s auction has just started.");
-							EconomyAPI::getInstance()->reduceMoney($sender, $tax, null, new CommandIssuer($sender, "auction", "start ..."));
-						}else{
-							$sender->sendMessage("You don't have enough items");
-						}
-						break;
-					case "stop":
-						$auction = array_shift($params);
-						if(trim($auction) === "" and !$sender instanceof Player) {
-							$sender->sendMessage("Usage: /auction stop <player>");
-							break;
-						} elseif(trim($auction) === "" and $sender instanceof Player) {
-							$auction = $sender->getName();
-						}else{
-							$player = $this->getServer()->getPlayer($auction);
-							if($player instanceof Player) {
-								$auction = $player->getName();
-							}
-						}
-						$auction = strtolower($auction);
-						if(!isset($this->auctions[$auction])) {
-							$sender->sendMessage((strtolower($sender->getName()) === $auction ? "You have" : "$auction has") . " no ongoing auction");
-							break;
-						}
-						$this->quitAuction($auction);
-						$sender->sendMessage((strtolower($sender->getName()) === $auction ? "Your" : "$auction's") . " auction has successfully stopped.");
-						break;
-					case "time":
-						if(!$sender instanceof Player) {
-							$sender->sendMessage("Please run this command in-game.");
-							return true;
-						}
-						$item = array_shift($params);
-						$count = array_shift($params);
-						$startPrice = array_shift($params);
-						$time = array_shift($params);
-						if(trim($item) === "" or !is_numeric($count) or !is_numeric($startPrice) or !is_numeric($time)) {
-							$sender->sendMessage("Usage: /auction time <item> <count> <start price> <time>");
-							break;
-						}
-						$itemData = explode(":", $item);
-						$item = ItemFactory::getInstance()->get((int)$itemData[0], (int)($itemData[1] ?? 0), 1);
-						$count = (int) $count;
-
-						$cnt = 0;
-						foreach($sender->getInventory()->getContents() as $i) {
-							if($i->equals($item)) {
-								$cnt += $i->getCount();
-							}
-							if($count <= $cnt) {
-								break;
-							}
-						}
-
-						if($count <= $cnt) {
-							$item->setCount($count);
-							$sender->getInventory()->removeItem($item);
-							$id = $this->getScheduler()->scheduleDelayedTask(new QuitAuctionTask($this, $sender->getName()), ($time * 20))->getHandler()->getTaskId();
-							$this->auctions[strtolower($sender->getName())] = array(
-									$item->getId(), $item->getMeta(), $count, (float) $startPrice, null, (float) $startPrice, $time, time(), $id
-							);
-							$this->getServer()->broadcastMessage($sender->getName() . "'s auction has just started.");
-						}else{
-							$sender->sendMessage("You don't have enough items");
-						}
-						break;
-					case "bid":
-						if(!$sender instanceof Player) {
-							$sender->sendMessage("Please run this command in-game.");
-							break;
-						}
-						$player = array_shift($params);
-						$price = array_shift($params);
-						if(trim($player) === "" or !is_numeric($price)) {
-							$sender->sendMessage("Usage: /auction bid <player> <price>");
-							break;
-						}
-						if(!isset($this->auctions[$player])) {
-							$sender->sendMessage("Auction by \"$player\" does not exist");
-							break;
-						}
-						if($price > (int) $this->auctions[$player][5]) {
-							$this->auctions[$player][5] = $price;
-							$this->auctions[$player][4] = $sender->getName();
-							$sender->sendMessage("You have bid " . EconomyAPI::getInstance()->getMonetaryUnit() . "$price to auction by \"$player\"");
-						}else{
-							$sender->sendMessage("Current price is bigger than you have tried to bid");
-						}
-						break;
-					case "list":
-						$output = "Auctions list:\n";
-						foreach($this->auctions as $player => $data) {
-							$price = $data[5] === null ? $data[3] : $data[5];
-							$p = $data[4] === null ? "No player" : $data[4];
-							$output .= "##" . $player . " | " . EconomyAPI::getInstance()->getMonetaryUnit() . "$price | " . $data[2] . " of " . $data[0] . ":" . $data[1] . " | $p\n";
-						}
-						$output = substr($output, 0, -1);
-						$sender->sendMessage($output);
-						break;
-					default:
-						$sender->sendMessage("Usage: " . $command->getUsage());
-				}
+	public function onCommand(CommandSender $sender, Command $command, string $label, array $args): bool {
+		if($command->getName() === "auction") {
+			if(!$sender instanceof Player) {
+				$sender->sendMessage(TextFormat::RED . "Please run this command in-game.");
 				return true;
+			}
 
-			default:
+			if(!isset($args[0])) {
+				$sender->sendMessage(TextFormat::RED . "Usage: /auction <start|bid|list|end>");
 				return true;
+			}
+
+			$subCommand = strtolower($args[0]);
+
+			switch($subCommand) {
+				case "start":
+					if(!$sender->hasPermission("economyauction.start")) {
+						$sender->sendMessage(TextFormat::RED . "You don't have permission to start auctions.");
+						return true;
+					}
+
+					if(!isset($args[1]) || !isset($args[2])) {
+						$sender->sendMessage(TextFormat::RED . "Usage: /auction start <starting_price> <duration_minutes>");
+						return true;
+					}
+
+					$startingPrice = (float) $args[1];
+					$duration = (int) $args[2];
+
+					if($startingPrice <= 0) {
+						$sender->sendMessage(TextFormat::RED . "Starting price must be positive.");
+						return true;
+					}
+
+					if($duration <= 0 || $duration > 60) {
+						$sender->sendMessage(TextFormat::RED . "Duration must be between 1 and 60 minutes.");
+						return true;
+					}
+
+					$this->startAuction($sender, $startingPrice, $duration);
+					break;
+
+				case "bid":
+					if(!$sender->hasPermission("economyauction.bid")) {
+						$sender->sendMessage(TextFormat::RED . "You don't have permission to bid.");
+						return true;
+					}
+
+					if(!isset($args[1])) {
+						$sender->sendMessage(TextFormat::RED . "Usage: /auction bid <amount>");
+						return true;
+					}
+
+					$bidAmount = (float) $args[1];
+
+					if($bidAmount <= 0) {
+						$sender->sendMessage(TextFormat::RED . "Bid amount must be positive.");
+						return true;
+					}
+
+					$this->placeBid($sender, $bidAmount);
+					break;
+
+				case "list":
+					$this->showAuctions($sender);
+					break;
+
+				case "end":
+					if(!$sender->hasPermission("economyauction.admin")) {
+						$sender->sendMessage(TextFormat::RED . "You don't have permission to end auctions.");
+						return true;
+					}
+
+					$this->endCurrentAuction($sender);
+					break;
+
+				default:
+					$sender->sendMessage(TextFormat::RED . "Usage: /auction <start|bid|list|end>");
+					break;
+			}
+
+			return true;
 		}
+
+		return false;
 	}
 
-	public function quitAuction($auction) {
-		if($this->auctions[$auction][8] !== null) {
-			$this->getScheduler()->cancelTask($this->auctions[$auction][8]);
+	private function startAuction(Player $player, float $startingPrice, int $duration): void {
+		if(!empty($this->auctions)) {
+			$player->sendMessage(TextFormat::RED . "An auction is already in progress!");
+			return;
 		}
-		if($this->auctions[$auction][4] !== null) {
-			$p = $this->getServer()->getPlayerExact($this->auctions[$auction][4]);
-			if($p instanceof Player) {
-				$p->getInventory()->addItem(new Item($this->auctions[$auction][0], $this->auctions[$auction][1], $this->auctions[$auction][2]));
-				EconomyAPI::getInstance()->reduceMoney($p, $this->auctions[$auction][5], null, null, true);
-				$p->sendMessage("You've got item from the auction");
-			}else{
-				$this->queue[$this->auctions[$auction][4]] = array(
-						$this->auctions[$auction][0], $this->auctions[$auction][1], $this->auctions[$auction][2]
-				);
+
+		$item = $player->getInventory()->getItemInHand();
+		if($item->isNull() || $item->getCount() === 0) {
+			$player->sendMessage(TextFormat::RED . "You must hold an item to auction!");
+			return;
+		}
+
+		$auctionId = uniqid();
+		$endTime = time() + ($duration * 60);
+
+		$this->auctions[$auctionId] = [
+			"seller" => $player->getName(),
+			"item" => $item,
+			"starting_price" => $startingPrice,
+			"current_bid" => $startingPrice,
+			"highest_bidder" => null,
+			"end_time" => $endTime,
+			"duration" => $duration
+		];
+
+		$player->getInventory()->setItemInHand($item->setCount(0));
+
+		$this->getScheduler()->scheduleDelayedTask(new QuitAuctionTask($this, $auctionId), $duration * 60 * 20);
+
+		$this->broadcastMessage(TextFormat::GREEN . "New auction started by " . $player->getName() . "!");
+		$this->broadcastMessage(TextFormat::YELLOW . "Item: " . $item->getName() . " x" . $item->getCount());
+		$this->broadcastMessage(TextFormat::YELLOW . "Starting price: $" . $startingPrice);
+		$this->broadcastMessage(TextFormat::YELLOW . "Duration: " . $duration . " minutes");
+		$this->broadcastMessage(TextFormat::AQUA . "Use /auction bid <amount> to place a bid!");
+	}
+
+	private function placeBid(Player $player, float $bidAmount): void {
+		if(empty($this->auctions)) {
+			$player->sendMessage(TextFormat::RED . "No auction is currently active!");
+			return;
+		}
+
+		$auction = reset($this->auctions);
+		$auctionId = key($this->auctions);
+
+		if($auction["seller"] === $player->getName()) {
+			$player->sendMessage(TextFormat::RED . "You cannot bid on your own auction!");
+			return;
+		}
+
+		if($bidAmount <= $auction["current_bid"]) {
+			$player->sendMessage(TextFormat::RED . "Your bid must be higher than the current bid of $" . $auction["current_bid"]);
+			return;
+		}
+
+		if($this->api->myMoney($player) < $bidAmount) {
+			$player->sendMessage(TextFormat::RED . "You don't have enough money to place this bid!");
+			return;
+		}
+
+		// Return money to previous highest bidder
+		if($auction["highest_bidder"] !== null) {
+			$previousBidder = $this->getServer()->getPlayerExact($auction["highest_bidder"]);
+			if($previousBidder !== null) {
+				$this->api->addMoney($previousBidder, $auction["current_bid"]);
+				$previousBidder->sendMessage(TextFormat::YELLOW . "You have been outbid! Your money has been returned.");
 			}
-			EconomyAPI::getInstance()->addMoney($auction, $this->auctions[$auction][5], null, null, true);
-		}else{
-			$p = $this->getServer()->getPlayerExact($auction);
-			if($p instanceof Player) {
-				$p->getInventory()->addItem(new Item($this->auctions[$auction][0], $this->auctions[$auction][1], $this->auctions[$auction][2]));
-				$p->sendMessage("Your auction was finished without buyer.");
-			}else{
-				$this->queue[$auction] = array(
-						$this->auctions[$auction][0], $this->auctions[$auction][1], $this->auctions[$auction][2]
-				);
+		}
+
+		// Take money from new bidder
+		$this->api->reduceMoney($player, $bidAmount);
+
+		$this->auctions[$auctionId]["current_bid"] = $bidAmount;
+		$this->auctions[$auctionId]["highest_bidder"] = $player->getName();
+
+		$this->broadcastMessage(TextFormat::GREEN . $player->getName() . " placed a bid of $" . $bidAmount . "!");
+	}
+
+	private function showAuctions(Player $player): void {
+		if(empty($this->auctions)) {
+			$player->sendMessage(TextFormat::YELLOW . "No auctions are currently active.");
+			return;
+		}
+
+		$auction = reset($this->auctions);
+
+		$timeLeft = $auction["end_time"] - time();
+		$minutesLeft = ceil($timeLeft / 60);
+
+		$player->sendMessage(TextFormat::GREEN . "=== Current Auction ===");
+		$player->sendMessage(TextFormat::YELLOW . "Seller: " . $auction["seller"]);
+		$player->sendMessage(TextFormat::YELLOW . "Item: " . $auction["item"]->getName() . " x" . $auction["item"]->getCount());
+		$player->sendMessage(TextFormat::YELLOW . "Current bid: $" . $auction["current_bid"]);
+		$player->sendMessage(TextFormat::YELLOW . "Highest bidder: " . ($auction["highest_bidder"] ?? "None"));
+		$player->sendMessage(TextFormat::YELLOW . "Time left: " . $minutesLeft . " minutes");
+	}
+
+	private function endCurrentAuction(?Player $admin = null): void {
+		if(empty($this->auctions)) {
+			if($admin !== null) {
+				$admin->sendMessage(TextFormat::RED . "No auction is currently active!");
 			}
+			return;
 		}
-		if(isset($this->auctions[$auction][8])) {
-			$this->getScheduler()->cancelTask($this->auctions[$auction][8]);
+
+		$auction = reset($this->auctions);
+		$auctionId = key($this->auctions);
+
+		$this->endAuction($auctionId);
+	}
+
+	public function endAuction(string $auctionId): void {
+		if(!isset($this->auctions[$auctionId])) {
+			return;
 		}
-		unset($this->auctions[$auction]);
+
+		$auction = $this->auctions[$auctionId];
+
+		if($auction["highest_bidder"] !== null) {
+			// Give money to seller
+			$seller = $this->getServer()->getPlayerExact($auction["seller"]);
+			if($seller !== null) {
+				$this->api->addMoney($seller, $auction["current_bid"]);
+				$seller->sendMessage(TextFormat::GREEN . "Your auction ended! You received $" . $auction["current_bid"]);
+			}
+
+			// Give item to winner
+			$winner = $this->getServer()->getPlayerExact($auction["highest_bidder"]);
+			if($winner !== null) {
+				$winner->getInventory()->addItem($auction["item"]);
+				$winner->sendMessage(TextFormat::GREEN . "Congratulations! You won the auction for $" . $auction["current_bid"]);
+			}
+
+			$this->broadcastMessage(TextFormat::GREEN . "Auction ended! Winner: " . $auction["highest_bidder"] . " for $" . $auction["current_bid"]);
+		} else {
+			// No bids, return item to seller
+			$seller = $this->getServer()->getPlayerExact($auction["seller"]);
+			if($seller !== null) {
+				$seller->getInventory()->addItem($auction["item"]);
+				$seller->sendMessage(TextFormat::YELLOW . "Your auction ended with no bids. Item returned.");
+			}
+
+			$this->broadcastMessage(TextFormat::YELLOW . "Auction ended with no bids.");
+		}
+
+		unset($this->auctions[$auctionId]);
+	}
+
+	private function broadcastMessage(string $message): void {
+		$this->getServer()->broadcastMessage($message);
 	}
 }

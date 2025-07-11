@@ -1,45 +1,30 @@
 name: EconomyAuction
 main: onebone\economyauction\EconomyAuction
-version: "2.0.2"
-api: 5.0.0
-
+version: "2.0.0"
 author: onebone
+api: 5.0.0
 depend: [EconomyAPI]
 
 commands:
- auction:
-  description: Manages all auctions
-  usage: /auction <start|stop|time|bid>
-  permission: economyauction.command.auction
+  auction:
+    description: "Auction management command"
+    usage: "/auction <start|bid|list|end>"
+    permission: economyauction.command
 
 permissions:
- economyauction:
-  description: Allows player to use all functions in EconomyAuction
-  default: op
-  children:
-   economyauction.command:
-    description: Allows player to use all of commands in EconomyAuction
+  economyauction:
     default: op
+    description: "Allows access to all EconomyAuction features"
     children:
-     economyauction.command.auction:
-      description: Allows player to manage all the auctions
-      default: true
-      children:
-       economyauction.command.auction.start:
-        description: Allows player to start auction with no limited time
+      economyauction.command:
         default: true
-       economyauction.command.auction.stop:
-        description: Allows player to stop auction by force
+        description: "Allows use of auction command"
+      economyauction.start:
         default: true
-       economyauction.command.auction.time:
-        description: Allows player to start auction with limited time
+        description: "Allows starting auctions"
+      economyauction.bid:
         default: true
-       economyauction.command.auction.bid:
-        description: Allows player to bid price for an auction
-        default: true
-       economyauction.command.auction.list:
-        description: Allows player to see list of auctions
-        default: true
-   economyauction.auction.stop.others:
-    description: Allows player to stop others' auctions
-    default: op
+        description: "Allows bidding on auctions"
+      economyauction.admin:
+        default: op
+        description: "Allows ending auctions forcefully"

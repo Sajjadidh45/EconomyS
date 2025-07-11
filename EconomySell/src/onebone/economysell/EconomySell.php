@@ -29,21 +29,16 @@ use onebone\economysell\provider\YamlDataProvider;
 use pocketmine\command\Command;
 use pocketmine\command\CommandSender;
 use pocketmine\event\block\BlockBreakEvent;
-use pocketmine\event\block\BlockPlaceEvent;
-use pocketmine\event\entity\EntityTeleportEvent;
 use pocketmine\event\Listener;
 use pocketmine\event\player\PlayerInteractEvent;
 use pocketmine\event\player\PlayerJoinEvent;
 use pocketmine\item\Item;
-use pocketmine\world\Position;
-use pocketmine\math\Vector3;
-use pocketmine\player\Player;
 use pocketmine\item\StringToItemParser;
+use pocketmine\world\Position;
+use pocketmine\player\Player;
 use pocketmine\plugin\PluginBase;
-use pocketmine\utils\TextFormat;
 use pocketmine\utils\Config;
-use pocketmine\block\tile\Sign;
-use pocketmine\block\utils\SignText;
+use pocketmine\utils\TextFormat;
 
 class EconomySell extends PluginBase implements Listener {
 	/** @var EconomyAPI */
@@ -54,10 +49,8 @@ class EconomySell extends PluginBase implements Listener {
 	private $displayers = [];
 	/** @var Config */
 	private $lang;
-	/** @var array */
-	private $tap = [];
 
-	public function onEnable() {
+	public function onEnable(): void {
 		if(!file_exists($this->getDataFolder())) {
 			mkdir($this->getDataFolder());
 		}
@@ -74,235 +67,234 @@ class EconomySell extends PluginBase implements Listener {
 
 		$this->provider = new YamlDataProvider($this->getDataFolder() . "Sells.yml", true);
 
+		$this->lang = new Config($this->getDataFolder() . "lang_en.json", Config::JSON);
+
 		$this->getServer()->getPluginManager()->registerEvents($this, $this);
 
-		foreach($this->provider->getAll() as $level => $sells) {
-			if(!is_array($sells)) continue;
-			foreach($sells as $x => $xData) {
-				if(!is_array($xData)) continue;
-				foreach($xData as $y => $yData) {
-					if(!is_array($yData)) continue;
-					foreach($yData as $z => $sell) {
-						if(!is_array($sell)) continue;
-						$pos = new Position((int)$x, (int)$y, (int)$z, $this->getServer()->getWorldManager()->getWorldByName($level));
-						if($pos->getWorld() === null) continue;
+		foreach($this->provider->getAll() as $sell) {
+			$pos = new Position($sell["x"], $sell["y"], $sell["z"], $this->getServer()->getWorldManager()->getWorldByName($sell["level"]));
+			if($pos->getWorld() === null) continue;
 
-						$item = StringToItemParser::getInstance()->parse($sell["item"] ?? "");
-						if($item === null) continue;
+			$item = StringToItemParser::getInstance()->parse($sell["item"]);
+			if($item === null) continue;
 
-						$this->displayers[] = new ItemDisplayer($pos, $item, $pos);
-					}
-				}
-			}
+			$this->displayers[] = new ItemDisplayer($pos, $item, $pos);
+		}
+
+		$this->getLogger()->info("EconomySell has been enabled");
+	}
+
+	public function onDisable(): void {
+		foreach($this->displayers as $displayer) {
+			$displayer->despawnFromAll();
+		}
+		$this->provider->save();
+	}
+
+	/**
+	 * @param PlayerJoinEvent $event
+	 * @priority MONITOR
+	 * @ignoreCancelled true
+	 */
+	public function onPlayerJoin(PlayerJoinEvent $event): void {
+		foreach($this->displayers as $displayer) {
+			$displayer->spawnTo($event->getPlayer());
 		}
 	}
 
-	public function onJoin(PlayerJoinEvent $event) {
+	/**
+	 * @param BlockBreakEvent $event
+	 * @priority HIGHEST
+	 * @ignoreCancelled true
+	 */
+	public function onBlockBreak(BlockBreakEvent $event): void {
 		$player = $event->getPlayer();
-		foreach($this->displayers as $displayer) {
-			$displayer->spawnTo($player);
+		$block = $event->getBlock();
+
+		if($this->provider->sellExists($block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName())) {
+			$sell = $this->provider->getSell($block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName());
+			
+			if($sell["owner"] !== strtolower($player->getName()) && !$player->hasPermission("economysell.admin")) {
+				$player->sendMessage($this->getMessage("sell-break-not-owner", $player->getName()));
+				$event->cancel();
+				return;
+			}
+
+			$this->provider->removeSell($block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName());
+			
+			// Remove displayer
+			foreach($this->displayers as $key => $displayer) {
+				if($displayer->getLinked()->equals($block->getPosition())) {
+					$displayer->despawnFromAll();
+					unset($this->displayers[$key]);
+					break;
+				}
+			}
+
+			$player->sendMessage($this->getMessage("sell-removed", $player->getName()));
+		}
+	}
+
+	/**
+	 * @param PlayerInteractEvent $event
+	 * @priority HIGHEST
+	 * @ignoreCancelled true
+	 */
+	public function onPlayerInteract(PlayerInteractEvent $event): void {
+		$player = $event->getPlayer();
+		$block = $event->getBlock();
+		$item = $player->getInventory()->getItemInHand();
+
+		if($this->provider->sellExists($block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName())) {
+			$sell = $this->provider->getSell($block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName());
+			
+			$sellItem = StringToItemParser::getInstance()->parse($sell["item"]);
+			if($sellItem === null) {
+				$player->sendMessage($this->getMessage("invalid-item", $player->getName()));
+				return;
+			}
+
+			if(!$item->equals($sellItem, true, false)) {
+				$player->sendMessage($this->getMessage("wrong-item", $player->getName(), [$sellItem->getName()]));
+				return;
+			}
+
+			$price = $sell["price"];
+			$amount = min($item->getCount(), $sellItem->getCount());
+
+			$totalPrice = $price * $amount;
+
+			$ev = new SellTransactionEvent($this, $player, $sell, $item, $totalPrice);
+			$ev->call();
+			if($ev->isCancelled()) {
+				return;
+			}
+
+			$this->api->addMoney($player, $totalPrice);
+			$player->getInventory()->removeItem($item->setCount($amount));
+
+			$player->sendMessage($this->getMessage("item-sold", $player->getName(), [$amount, $sellItem->getName(), $totalPrice]));
 		}
 	}
 
 	public function onCommand(CommandSender $sender, Command $command, string $label, array $args): bool {
-		switch($command->getName()) {
-			case "sell":
-				if(!$sender instanceof Player) {
-					$sender->sendMessage(TextFormat::RED . "Please run this command in-game.");
-					return false;
-				}
+		if($command->getName() === "sell") {
+			if(!$sender instanceof Player) {
+				$sender->sendMessage(TextFormat::RED . "Please run this command in-game.");
+				return true;
+			}
 
-				if(!isset($args[0])) {
+			if(!isset($args[0])) {
+				$sender->sendMessage(TextFormat::RED . "Usage: /sell <create|remove>");
+				return true;
+			}
+
+			switch(strtolower($args[0])) {
+				case "create":
+					if(!$sender->hasPermission("economysell.create")) {
+						$sender->sendMessage(TextFormat::RED . "You don't have permission to create sell points.");
+						return true;
+					}
+
+					if(!isset($args[1]) || !isset($args[2])) {
+						$sender->sendMessage(TextFormat::RED . "Usage: /sell create <item> <price>");
+						return true;
+					}
+
+					$item = StringToItemParser::getInstance()->parse($args[1]);
+					if($item === null) {
+						$sender->sendMessage(TextFormat::RED . "Invalid item: " . $args[1]);
+						return true;
+					}
+
+					$price = (float) $args[2];
+
+					if($price <= 0) {
+						$sender->sendMessage(TextFormat::RED . "Price must be a positive number.");
+						return true;
+					}
+
+					$block = $sender->getTargetBlock(5);
+					if($block === null) {
+						$sender->sendMessage(TextFormat::RED . "You must be looking at a block.");
+						return true;
+					}
+
+					if($this->provider->sellExists($block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName())) {
+						$sender->sendMessage(TextFormat::RED . "A sell point already exists at this location.");
+						return true;
+					}
+
+					$ev = new SellCreationEvent($this, $sender, $block->getPosition(), $item, $price);
+					$ev->call();
+					if($ev->isCancelled()) {
+						return true;
+					}
+
+					$this->provider->addSell($sender->getName(), $item->__toString(), $price, $block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName());
+					
+					$displayer = new ItemDisplayer($block->getPosition()->add(0, 1, 0), $item, $block->getPosition());
+					$displayer->spawnToAll($block->getPosition()->getWorld());
+					$this->displayers[] = $displayer;
+
+					$sender->sendMessage($this->getMessage("sell-created", $sender->getName(), [$item->getName(), $price]));
+					break;
+
+				case "remove":
+					if(!$sender->hasPermission("economysell.remove")) {
+						$sender->sendMessage(TextFormat::RED . "You don't have permission to remove sell points.");
+						return true;
+					}
+
+					$block = $sender->getTargetBlock(5);
+					if($block === null) {
+						$sender->sendMessage(TextFormat::RED . "You must be looking at a block.");
+						return true;
+					}
+
+					if(!$this->provider->sellExists($block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName())) {
+						$sender->sendMessage(TextFormat::RED . "No sell point exists at this location.");
+						return true;
+					}
+
+					$sell = $this->provider->getSell($block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName());
+					
+					if($sell["owner"] !== strtolower($sender->getName()) && !$sender->hasPermission("economysell.admin")) {
+						$sender->sendMessage(TextFormat::RED . "You can only remove your own sell points.");
+						return true;
+					}
+
+					$this->provider->removeSell($block->getPosition()->getFloorX(), $block->getPosition()->getFloorY(), $block->getPosition()->getFloorZ(), $block->getPosition()->getWorld()->getFolderName());
+					
+					// Remove displayer
+					foreach($this->displayers as $key => $displayer) {
+						if($displayer->getLinked()->equals($block->getPosition())) {
+							$displayer->despawnFromAll();
+							unset($this->displayers[$key]);
+							break;
+						}
+					}
+
+					$sender->sendMessage($this->getMessage("sell-removed", $sender->getName()));
+					break;
+
+				default:
 					$sender->sendMessage(TextFormat::RED . "Usage: /sell <create|remove>");
-					return false;
-				}
-
-				switch(strtolower($args[0])) {
-					case "create":
-					case "c":
-						if(!$sender->hasPermission("economysell.command.sell.create")) {
-							$sender->sendMessage(TextFormat::RED . "You don't have permission to create sell points.");
-							return false;
-						}
-
-						if(!isset($args[1]) or !isset($args[2])) {
-							$sender->sendMessage(TextFormat::RED . "Usage: /sell create <item> <price>");
-							return false;
-						}
-
-						$item = StringToItemParser::getInstance()->parse($args[1]);
-						if($item === null) {
-							$sender->sendMessage(TextFormat::RED . "Invalid item: " . $args[1]);
-							return false;
-						}
-
-						if(!is_numeric($args[2]) or $args[2] < 0) {
-							$sender->sendMessage(TextFormat::RED . "Price must be a positive number.");
-							return false;
-						}
-
-						$price = (float) $args[2];
-
-						$pos = $sender->getPosition();
-						$sell = [
-							"item" => $args[1],
-							"price" => $price,
-							"creator" => $sender->getName()
-						];
-
-						$event = new SellCreationEvent($this, $sell, $sender);
-						$event->call();
-
-						if($event->isCancelled()) {
-							return false;
-						}
-
-						$this->provider->addSell($pos, $sell);
-						$this->displayers[] = new ItemDisplayer($pos, $item, $pos);
-
-						$sender->sendMessage(TextFormat::GREEN . "Sell point created successfully!");
-						return true;
-
-					case "remove":
-					case "r":
-						if(!$sender->hasPermission("economysell.command.sell.remove")) {
-							$sender->sendMessage(TextFormat::RED . "You don't have permission to remove sell points.");
-							return false;
-						}
-
-						$pos = $sender->getPosition();
-						$sell = $this->provider->getSell($pos);
-
-						if($sell === null) {
-							$sender->sendMessage(TextFormat::RED . "No sell point found at this location.");
-							return false;
-						}
-
-						if($sell["creator"] !== $sender->getName() and !$sender->hasPermission("economysell.admin")) {
-							$sender->sendMessage(TextFormat::RED . "You can only remove your own sell points.");
-							return false;
-						}
-
-						$this->provider->removeSell($pos);
-						$sender->sendMessage(TextFormat::GREEN . "Sell point removed successfully!");
-						return true;
-				}
-				break;
+					break;
+			}
+			return true;
 		}
 		return false;
 	}
 
-	public function onInteract(PlayerInteractEvent $event) {
-		$player = $event->getPlayer();
-		$block = $event->getBlock();
-		$pos = $block->getPosition();
-
-		if(isset($this->tap[$player->getName()])) {
-			$this->tap[$player->getName()] = $pos;
-			$player->sendMessage(TextFormat::GREEN . "Position selected! Use /sell create <item> <price> to create a sell point here.");
-			$event->cancel();
-			return;
+	private function getMessage(string $key, string $player, array $params = []): string {
+		$messages = $this->lang->getAll();
+		$message = $messages[$key] ?? $key;
+		
+		foreach($params as $i => $param) {
+			$message = str_replace("{%" . ($i + 1) . "}", $param, $message);
 		}
-
-		$sell = $this->provider->getSell($pos);
-		if($sell === null) return;
-
-		$event->cancel();
-
-		$item = StringToItemParser::getInstance()->parse($sell["item"]);
-		if($item === null) return;
-
-		$playerItem = $player->getInventory()->getItemInHand();
-		if(!$playerItem->equals($item, true, false)) {
-			$player->sendMessage(TextFormat::RED . "You need to hold " . $item->getName() . " to sell here!");
-			return;
-		}
-
-		if($playerItem->getCount() < 1) {
-			$player->sendMessage(TextFormat::RED . "You don't have any " . $item->getName() . " to sell!");
-			return;
-		}
-
-		$sellAmount = min($playerItem->getCount(), 64);
-		$totalPrice = $sell["price"] * $sellAmount;
-
-		$transactionEvent = new SellTransactionEvent($this, $sell, $player, $item, $totalPrice);
-		$transactionEvent->call();
-
-		if($transactionEvent->isCancelled()) {
-			return;
-		}
-
-		$playerItem->setCount($playerItem->getCount() - $sellAmount);
-		$player->getInventory()->setItemInHand($playerItem);
-
-		$this->api->addMoney($player, $totalPrice);
-
-		$player->sendMessage(TextFormat::GREEN . "You sold " . $item->getName() . " x" . $sellAmount . " for $" . $totalPrice);
-	}
-
-	public function onBreak(BlockBreakEvent $event) {
-		$pos = $event->getBlock()->getPosition();
-		$sell = $this->provider->getSell($pos);
-
-		if($sell !== null) {
-			$player = $event->getPlayer();
-			if($sell["creator"] !== $player->getName() and !$player->hasPermission("economysell.admin")) {
-				$event->cancel();
-				$player->sendMessage(TextFormat::RED . "You cannot break this sell point!");
-			} else {
-				$this->provider->removeSell($pos);
-				$player->sendMessage(TextFormat::GREEN . "Sell point removed!");
-			}
-		}
-	}
-
-	public function onPlace(BlockPlaceEvent $event) {
-		$player = $event->getPlayer();
-		$block = $event->getBlock();
-
-		if($block instanceof Sign) {
-			$pos = $block->getPosition();
-			$sell = $this->provider->getSell($pos);
-
-			if($sell !== null) {
-				$item = StringToItemParser::getInstance()->parse($sell["item"]);
-				if($item !== null) {
-					$lines = [
-						"[SELL]",
-						$item->getName(),
-						"Price: $" . $sell["price"],
-						"Creator: " . $sell["creator"]
-					];
-					
-					$signText = new SignText($lines);
-					$block->setText($signText);
-				}
-			}
-		}
-	}
-
-	public function onTeleport(EntityTeleportEvent $event) {
-		$entity = $event->getEntity();
-		if($entity instanceof Player) {
-			foreach($this->displayers as $displayer) {
-				$displayer->despawnFrom($entity);
-				$displayer->spawnTo($entity);
-			}
-		}
-	}
-
-	public function getAPI(): EconomyAPI {
-		return $this->api;
-	}
-
-	public function getProvider(): DataProvider {
-		return $this->provider;
-	}
-
-	public function onDisable() {
-		if($this->provider !== null) {
-			$this->provider->save();
-		}
+		
+		return TextFormat::colorize($message);
 	}
 }

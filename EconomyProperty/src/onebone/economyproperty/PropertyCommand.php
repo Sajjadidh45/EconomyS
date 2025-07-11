@@ -23,108 +23,79 @@ namespace onebone\economyproperty;
 use pocketmine\command\Command;
 use pocketmine\command\CommandSender;
 use pocketmine\player\Player;
-use pocketmine\plugin\Plugin;
-use pocketmine\Server;
 use pocketmine\utils\TextFormat;
-use pocketmine\world\World;
 
 class PropertyCommand extends Command {
+	/** @var EconomyProperty */
 	private $plugin;
-	private $pos1, $pos2, $make, $touchPos;
-	private $mergeData = [];
+	/** @var string */
+	private $pos1Command, $pos2Command, $makeCommand, $touchCommand;
 
-	public function __construct(EconomyProperty $plugin, $name, $pos1, $pos2, $make, $touchPos) {
-		parent::__construct($name);
+	public function __construct(EconomyProperty $plugin, string $name, string $pos1, string $pos2, string $make, string $touch) {
+		parent::__construct($name, "Property management command", "/$name <pos1|pos2|make|touch>");
 		$this->plugin = $plugin;
-		$this->pos1 = $pos1;
-		$this->pos2 = $pos2;
-		$this->make = $make;
-		$this->touchPos = $touchPos;
-		$this->setPermission("economyproperty.command.property");
+		$this->pos1Command = $pos1;
+		$this->pos2Command = $pos2;
+		$this->makeCommand = $make;
+		$this->touchCommand = $touch;
+		$this->setPermission("economyproperty.command");
 	}
 
-	public function execute(CommandSender $sender, string $label, array $params): bool {
+	public function execute(CommandSender $sender, string $label, array $args): bool {
 		if(!$this->testPermission($sender)) {
 			return false;
 		}
 
 		if(!$sender instanceof Player) {
 			$sender->sendMessage(TextFormat::RED . "Please run this command in-game.");
-			return false;
+			return true;
 		}
 
-		if(!isset($params[0])) {
-			$sender->sendMessage(TextFormat::RED . "Usage: /" . $this->getName() . " <pos1|pos2|make|touchpos>");
-			return false;
+		if(!isset($args[0])) {
+			$sender->sendMessage(TextFormat::RED . "Usage: /" . $label . " <pos1|pos2|make|touch>");
+			return true;
 		}
 
-		switch(strtolower($params[0])) {
-			case $this->pos1:
-				$pos = $sender->getPosition();
-				$this->mergePosition($sender->getName(), 0, [(int) $pos->getX(), (int) $pos->getZ(), $pos->getWorld()->getFolderName()]);
-				$sender->sendMessage("[EconomyProperty] First position has been saved.");
-				return true;
+		switch(strtolower($args[0])) {
+			case $this->pos1Command:
+			case "pos1":
+				$this->plugin->setTapMode($sender, "pos1");
+				$sender->sendMessage(TextFormat::GREEN . "Tap a block to set position 1.");
+				break;
 
-			case $this->pos2:
-				$pos = $sender->getPosition();
-				$this->mergePosition($sender->getName(), 1, [(int) $pos->getX(), (int) $pos->getZ(), $pos->getWorld()->getFolderName()]);
-				$sender->sendMessage("[EconomyProperty] Second position has been saved.");
-				return true;
+			case $this->pos2Command:
+			case "pos2":
+				$this->plugin->setTapMode($sender, "pos2");
+				$sender->sendMessage(TextFormat::GREEN . "Tap a block to set position 2.");
+				break;
 
-			case $this->make:
-				if(!isset($params[1]) or !is_numeric($params[1])) {
-					$sender->sendMessage(TextFormat::RED . "Usage: /" . $this->getName() . " " . $this->make . " <price>");
-					return false;
+			case $this->makeCommand:
+			case "make":
+				if(!isset($args[1]) || !is_numeric($args[1])) {
+					$sender->sendMessage(TextFormat::RED . "Usage: /" . $label . " make <price>");
+					return true;
 				}
 
-				if(!isset($this->mergeData[$sender->getName()][0]) or !isset($this->mergeData[$sender->getName()][1])) {
-					$sender->sendMessage(TextFormat::RED . "Please set both positions first.");
-					return false;
+				$price = (float) $args[1];
+				if($price <= 0) {
+					$sender->sendMessage(TextFormat::RED . "Price must be a positive number.");
+					return true;
 				}
 
-				$pos1 = $this->mergeData[$sender->getName()][0];
-				$pos2 = $this->mergeData[$sender->getName()][1];
+				$this->plugin->createProperty($sender, $price);
+				break;
 
-				if($pos1[2] !== $pos2[2]) {
-					$sender->sendMessage(TextFormat::RED . "Both positions must be in the same world.");
-					return false;
-				}
+			case $this->touchCommand:
+			case "touch":
+				$this->plugin->setTapMode($sender, "touchpos");
+				$sender->sendMessage(TextFormat::GREEN . "Tap a block to check property information.");
+				break;
 
-				$startX = min($pos1[0], $pos2[0]);
-				$endX = max($pos1[0], $pos2[0]);
-				$startZ = min($pos1[1], $pos2[1]);
-				$endZ = max($pos1[1], $pos2[1]);
-
-				$price = (float) $params[1];
-
-				$this->plugin->getProperty()->exec("INSERT INTO Property (startX, endX, startZ, endZ, level, owner, price) VALUES ($startX, $endX, $startZ, $endZ, '{$pos1[2]}', '{$sender->getName()}', $price)");
-				$sender->sendMessage(TextFormat::GREEN . "Property created successfully!");
-
-				unset($this->mergeData[$sender->getName()]);
-				return true;
-
-			case $this->touchPos:
-				if(isset($this->plugin->touch[$sender->getName()])) {
-					unset($this->plugin->touch[$sender->getName()]);
-					$sender->sendMessage("[EconomyProperty] Touch position mode disabled.");
-				} else {
-					$this->plugin->touch[$sender->getName()] = true;
-					$sender->sendMessage("[EconomyProperty] Touch position mode enabled. Touch a block to set first position.");
-				}
-				return true;
+			default:
+				$sender->sendMessage(TextFormat::RED . "Usage: /" . $label . " <pos1|pos2|make|touch>");
+				break;
 		}
 
-		return false;
-	}
-
-	public function mergePosition(string $player, int $pos, array $data) {
-		if(!isset($this->mergeData[$player])) {
-			$this->mergeData[$player] = [];
-		}
-		$this->mergeData[$player][$pos] = $data;
-	}
-
-	public function getPlugin(): Plugin {
-		return $this->plugin;
+		return true;
 	}
 }

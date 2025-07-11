@@ -1,22 +1,18 @@
 name: EconomyProperty
 main: onebone\economyproperty\EconomyProperty
-version: "2.0.1"
-api: 5.0.0
-
-depend: [EconomyAPI]
+version: "2.0.0"
 author: onebone
-
-commands:
-  property:
-   description: EconomyProperty command
-   usage: /property
-   permission: economyproperty.command.property
+api: 5.0.0
+depend: [EconomyAPI]
 
 permissions:
- economyproperty.command:
-  description: Allows player to use all of property command
-  default: op
-  children:
-   economyproperty.command.property:
-    description: Allows player to use /property command
-    default: true
+  economyproperty:
+    default: op
+    description: "Allows access to all EconomyProperty features"
+    children:
+      economyproperty.command:
+        default: op
+        description: "Allows use of property command"
+      economyproperty.admin:
+        default: op
+        description: "Allows administrative property management"
