@@ -38,10 +38,10 @@ class EventListener implements Listener {
 	}
 
 	/*public function onDataPacketSend(DataPacketSendEvent $event) {
-		$pk = $event->getPacket();
+		$pk = $event->getPackets()[0];
 		if(!$pk instanceof AvailableCommandsPacket) return;
 
-		$player = $event->getPlayer();
+		$player = $event->getTargets()[0]->getPlayer();
 
 		$currencies = self::also(new CommandParameter(), function(CommandParameter $it) {
 			$it->paramName = 'currency ID';
@@ -165,14 +165,14 @@ class EventListener implements Listener {
 	/** @noinspection PhpUnusedParameterInspection */
 	/*public function onPlayerJoin(PlayerJoinEvent $_) {
 		foreach($this->plugin->getServer()->getOnlinePlayers() as $player) {
-			$player->sendCommandData();
+			$player->getNetworkSession()->syncAvailableCommands();
 		}
 	}*/
 
 	/** @noinspection PhpUnusedParameterInspection */
 	/*public function onPlayerQuit(PlayerQuitEvent $_) {
 		foreach($this->plugin->getServer()->getOnlinePlayers() as $player) {
-			$player->sendCommandData();
+			$player->getNetworkSession()->syncAvailableCommands();
 		}
 	}*/
 

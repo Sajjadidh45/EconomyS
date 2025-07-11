@@ -38,9 +38,9 @@ class MyMoneyCommand extends Command {
 		$this->setPermission("economyapi.command.mymoney");
 	}
 
-	public function execute(CommandSender $sender, string $label, array $params): void {
+	public function execute(CommandSender $sender, string $label, array $params): bool {
 		if(!$this->testPermission($sender)) {
-			return;
+			return false;
 		}
 
 		if($sender instanceof Player) {
@@ -52,7 +52,7 @@ class MyMoneyCommand extends Command {
 
 				if($currency === null) {
 					$sender->sendMessage($plugin->getMessage('currency-unavailable', $sender, [$currencyId]));
-					return;
+					return false;
 				}
 			}else{
 				$currency = $plugin->getPlayerPreferredCurrency($sender, false);
@@ -73,9 +73,9 @@ class MyMoneyCommand extends Command {
 					}
 				}
 			}
-			return;
+			return true;
 		}
 		$sender->sendMessage(TextFormat::RED . "Please run this command in-game.");
+		return false;
 	}
 }
-

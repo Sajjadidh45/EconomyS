@@ -32,207 +32,164 @@ use pocketmine\utils\Config;
 use pocketmine\utils\TextFormat;
 
 class EconomyJob extends PluginBase implements Listener {
-	/** @var EconomyJob */
-	private static $instance;
-	private Config $jobs;
-	private Config $player;
-	private EconomyAPI $api;
-
-	/**
-	 * @return EconomyJob
-	 */
-	public static function getInstance() {
-		return static::$instance;
-	}
+	/** @var EconomyAPI */
+	private $api;
+	/** @var Config */
+	private $jobs;
+	/** @var Config */
+	private $players;
 
 	public function onEnable() {
-		$this->saveResource('jobs.yml');
-
-		$this->jobs = new Config($this->getDataFolder() . "jobs.yml", Config::YAML);
-		$this->player = new Config($this->getDataFolder() . "players.yml", Config::YAML);
-
-		$this->getServer()->getPluginManager()->registerEvents($this, $this);
+		if(!file_exists($this->getDataFolder())) {
+			mkdir($this->getDataFolder());
+		}
 
 		$this->api = EconomyAPI::getInstance();
-		self::$instance = $this;
+		if($this->api === null) {
+			$this->getLogger()->critical("EconomyAPI plugin not found!");
+			$this->getServer()->getPluginManager()->disablePlugin($this);
+			return;
+		}
+
+		$this->saveResource("jobs.yml");
+		$this->jobs = new Config($this->getDataFolder() . "jobs.yml", Config::YAML);
+		$this->players = new Config($this->getDataFolder() . "players.yml", Config::YAML);
+
+		$this->getServer()->getPluginManager()->registerEvents($this, $this);
+	}
+
+	public function onCommand(CommandSender $sender, Command $command, string $label, array $args): bool {
+		if($command->getName() === "job") {
+			if(!$sender instanceof Player) {
+				$sender->sendMessage(TextFormat::RED . "Please run this command in-game.");
+				return false;
+			}
+
+			if(!isset($args[0])) {
+				$sender->sendMessage(TextFormat::RED . "Usage: /job <join|retire|list|detail|me>");
+				return false;
+			}
+
+			switch(strtolower($args[0])) {
+				case "join":
+					if(!isset($args[1])) {
+						$sender->sendMessage(TextFormat::RED . "Usage: /job join <job>");
+						return false;
+					}
+
+					$job = strtolower($args[1]);
+					if(!$this->jobs->exists($job)) {
+						$sender->sendMessage(TextFormat::RED . "Job '$job' does not exist.");
+						return false;
+					}
+
+					if($this->getPlayerJob($sender->getName()) !== null) {
+						$sender->sendMessage(TextFormat::RED . "You already have a job. Use /job retire first.");
+						return false;
+					}
+
+					$this->setPlayerJob($sender->getName(), $job);
+					$sender->sendMessage(TextFormat::GREEN . "You joined job: " . $job);
+					return true;
+
+				case "retire":
+					if($this->getPlayerJob($sender->getName()) === null) {
+						$sender->sendMessage(TextFormat::RED . "You don't have a job.");
+						return false;
+					}
+
+					$this->setPlayerJob($sender->getName(), null);
+					$sender->sendMessage(TextFormat::GREEN . "You retired from your job.");
+					return true;
+
+				case "list":
+					$sender->sendMessage(TextFormat::YELLOW . "Available jobs:");
+					foreach($this->jobs->getAll() as $jobName => $jobData) {
+						$sender->sendMessage(TextFormat::AQUA . "- " . $jobName);
+					}
+					return true;
+
+				case "detail":
+					if(!isset($args[1])) {
+						$sender->sendMessage(TextFormat::RED . "Usage: /job detail <job>");
+						return false;
+					}
+
+					$job = strtolower($args[1]);
+					if(!$this->jobs->exists($job)) {
+						$sender->sendMessage(TextFormat::RED . "Job '$job' does not exist.");
+						return false;
+					}
+
+					$jobData = $this->jobs->get($job);
+					$sender->sendMessage(TextFormat::YELLOW . "Job: " . $job);
+					$sender->sendMessage(TextFormat::AQUA . "Description: " . ($jobData["description"] ?? "No description"));
+					$sender->sendMessage(TextFormat::AQUA . "Salary: $" . ($jobData["salary"] ?? 0));
+					return true;
+
+				case "me":
+					$job = $this->getPlayerJob($sender->getName());
+					if($job === null) {
+						$sender->sendMessage(TextFormat::RED . "You don't have a job.");
+					} else {
+						$sender->sendMessage(TextFormat::GREEN . "Your job: " . $job);
+					}
+					return true;
+			}
+		}
+		return false;
+	}
+
+	public function onBlockBreak(BlockBreakEvent $event) {
+		$player = $event->getPlayer();
+		$job = $this->getPlayerJob($player->getName());
+
+		if($job !== null) {
+			$jobData = $this->jobs->get($job);
+			if(isset($jobData["break"])) {
+				$blockName = $event->getBlock()->getName();
+				if(isset($jobData["break"][$blockName])) {
+					$reward = $jobData["break"][$blockName];
+					$this->api->addMoney($player, $reward);
+					$player->sendMessage(TextFormat::GREEN . "You earned $" . $reward . " from your job!");
+				}
+			}
+		}
+	}
+
+	public function onBlockPlace(BlockPlaceEvent $event) {
+		$player = $event->getPlayer();
+		$job = $this->getPlayerJob($player->getName());
+
+		if($job !== null) {
+			$jobData = $this->jobs->get($job);
+			if(isset($jobData["place"])) {
+				$blockName = $event->getBlock()->getName();
+				if(isset($jobData["place"][$blockName])) {
+					$reward = $jobData["place"][$blockName];
+					$this->api->addMoney($player, $reward);
+					$player->sendMessage(TextFormat::GREEN . "You earned $" . $reward . " from your job!");
+				}
+			}
+		}
+	}
+
+	private function getPlayerJob(string $playerName): ?string {
+		return $this->players->get(strtolower($playerName));
+	}
+
+	private function setPlayerJob(string $playerName, ?string $job): void {
+		if($job === null) {
+			$this->players->remove(strtolower($playerName));
+		} else {
+			$this->players->set(strtolower($playerName), $job);
+		}
+		$this->players->save();
 	}
 
 	public function onDisable() {
-		$this->player->save();
-	}
-
-	/**
-	 * @priority MONITOR
-	 * @ignoreCancelled true
-	 * @param BlockBreakEvent $event
-	 */
-	public function onBlockBreak(BlockBreakEvent $event) {
-		$player = $event->getPlayer();
-		$block = $event->getBlock();
-
-		$job = $this->jobs->get($this->player->get($player->getName()));
-		if($job !== false) {
-			if(isset($job[$block->getId() . ":" . $block->getMeta() . ":break"])) {
-				$money = $job[$block->getId() . ":" . $block->getMeta() . ":break"];
-				if($money > 0) {
-					$this->api->addMoney($player, $money, null, null, true);
-				}else{
-					$this->api->reduceMoney($player, abs($money), null, null, true);
-				}
-			}
+		if($this->players !== null) {
+			$this->players->save();
 		}
-	}
-
-	/**
-	 * @priority MONITOR
-	 * @ignoreCancelled true
-	 * @param BlockPlaceEvent $event
-	 */
-	public function onBlockPlace(BlockPlaceEvent $event) {
-		$player = $event->getPlayer();
-		$block = $event->getBlock();
-
-		$job = $this->jobs->get($this->player->get($player->getName()));
-		if($job !== false) {
-			if(isset($job[$block->getId() . ":" . $block->getMeta() . ":place"])) {
-				$money = $job[$block->getId() . ":" . $block->getMeta() . ":place"];
-				if($money > 0) {
-					$this->api->addMoney($player, $money, null, null, true);
-				}else{
-					$this->api->reduceMoney($player, abs($money), null, null, true);
-				}
-			}
-		}
-	}
-
-	/**
-	 * @return array
-	 */
-	public function getJobs() {
-		return $this->jobs->getAll();
-	}
-
-	/**
-	 * @return array
-	 *
-	 */
-	public function getPlayers() {
-		return $this->player->getAll();
-	}
-
-	public function onCommand(CommandSender $sender, Command $command, string $label, array $params): bool {
-		switch (array_shift($params)) {
-			case "join":
-				if(!$sender instanceof Player) {
-					$sender->sendMessage("Please run this command in-game.");
-					return true;
-				}
-
-				if(!$sender->hasPermission('economyjob.command.job.join')) {
-					$sender->sendMessage(TextFormat::RED . "You don't have permission to run this command.");
-					return true;
-				}
-
-				if($this->player->exists($sender->getName())) {
-					$sender->sendMessage("You already have joined job.");
-				}else{
-					$job = array_shift($params);
-					if(trim($job) === "") {
-						$sender->sendMessage("Usage: /job join <name>");
-						break;
-					}
-					if($this->jobs->exists($job)) {
-						$this->player->set($sender->getName(), $job);
-						$sender->sendMessage("You have joined to the job \"$job\"");
-					}else{
-						$sender->sendMessage("There's no job named \"$job\"");
-					}
-				}
-				break;
-			case "retire":
-				if(!$sender instanceof Player) {
-					$sender->sendMessage("Please run this command in-game.");
-					return true;
-				}
-
-				if(!$sender->hasPermission('economyjob.command.job.retire')) {
-					$sender->sendMessage(TextFormat::RED . "You don't have permission to run this command.");
-					return true;
-				}
-
-				if($this->player->exists($sender->getName())) {
-					$job = $this->player->get($sender->getName());
-					$this->player->remove($sender->getName());
-					$sender->sendMessage("You have retired from the job \"$job\"");
-				}else{
-					$sender->sendMessage("You don't have job that you've joined");
-				}
-				break;
-			case "list":
-				if(!$sender->hasPermission('economyjob.command.job.list')) {
-					$sender->sendMessage(TextFormat::RED . "You don't have permission to run this command.");
-					return true;
-				}
-
-				$jobs = array_keys($this->getJobs());
-				$sender->sendMessage(TextFormat::colorize(
-					sprintf('List of jobs (&b%d&f): &6%s', count($jobs), implode('&f, &6', $jobs)))
-				);
-				break;
-			case "detail":
-				if(!$sender->hasPermission('economyjob.command.job.detail')) {
-					$sender->sendMessage(TextFormat::RED . "You don't have permission to run this command.");
-					return true;
-				}
-
-				$name = array_shift($params);
-				if($name === '') {
-					$sender->sendMessage('Usage: /job detail <name>');
-					return true;
-				}
-
-				$jobs = $this->getJobs();
-				if(!isset($jobs[$name])) {
-					$sender->sendMessage(sprintf(TextFormat::colorize('There is no job named &6%s&f', $name)));
-					return true;
-				}
-
-				if(!is_array($jobs[$name])) {
-					$sender->sendMessage(sprintf(TextFormat::colorize('Job &6%s&f is not in correct data format.', $name)));
-					return true;
-				}
-
-				$currency = $this->api->getDefaultCurrency();
-
-				$sender->sendMessage(sprintf(TextFormat::colorize('Job &6%s&f gets:'), $name));
-				foreach($jobs[$name] as $key => $money) {
-					$condition = explode(':', $key);
-					$item = $condition[0] . ':' . $condition[1];
-					$action = $condition[2];
-					$sender->sendMessage(TextFormat::colorize(sprintf('* &6%s&f if you %s %s.', $currency->format($money),
-						($action === 'break' ? '&c':'&a') . $action . '&f', $item)));
-				}
-				break;
-			case "me":
-				if(!$sender instanceof Player) {
-					$sender->sendMessage("Please run this command in-game.");
-					return true;
-				}
-
-				if(!$sender->hasPermission('economyjob.command.job.me')) {
-					$sender->sendMessage(TextFormat::RED . "You don't have permission to run this command.");
-					return true;
-				}
-
-				if($this->player->exists($sender->getName())) {
-					$sender->sendMessage("Your job : " . $this->player->get($sender->getName()));
-				}else{
-					$sender->sendMessage("You don't have any jobs you've joined.");
-				}
-				break;
-			default:
-				$sender->sendMessage($command->getUsage());
-		}
-		return true;
 	}
 }

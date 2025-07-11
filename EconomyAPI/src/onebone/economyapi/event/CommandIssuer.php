@@ -20,7 +20,7 @@
 
 namespace onebone\economyapi\event;
 
-use pocketmine\Player;
+use pocketmine\player\Player;
 
 class CommandIssuer implements Issuer {
 	/** @var Player */

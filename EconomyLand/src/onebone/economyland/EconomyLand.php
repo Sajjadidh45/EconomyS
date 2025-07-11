@@ -23,88 +23,88 @@ namespace onebone\economyland;
 use onebone\economyapi\EconomyAPI;
 use onebone\economyland\command\LandCommand;
 use onebone\economyland\land\LandManager;
+use onebone\economyland\provider\Provider;
 use onebone\economyland\provider\YamlProvider;
+use onebone\economyland\task\LandUnloadTask;
 use pocketmine\plugin\PluginBase;
+use pocketmine\utils\Config;
 
-final class EconomyLand extends PluginBase {
-	public const API_VERSION = 2;
-
-	const FALLBACK_LANGUAGE = 'en';
-
-	private $lang, $fallbackLang;
+class EconomyLand extends PluginBase {
 	/** @var EconomyAPI */
 	private $api;
+	/** @var LandManager */
+	private $landManager;
+	/** @var Provider */
+	private $provider;
 	/** @var PluginConfiguration */
 	private $pluginConfig;
-	/** @var LandManager */
-	private $landManager = null;
+	/** @var Config */
+	private $lang;
 
 	public function onEnable() {
+		if(!file_exists($this->getDataFolder())) {
+			mkdir($this->getDataFolder());
+		}
+
+		$this->api = EconomyAPI::getInstance();
+		if($this->api === null) {
+			$this->getLogger()->critical("EconomyAPI plugin not found!");
+			$this->getServer()->getPluginManager()->disablePlugin($this);
+			return;
+		}
+
 		$this->saveDefaultConfig();
+		$this->saveResource("lang_en.json");
+
 		$this->pluginConfig = new PluginConfiguration($this);
+		$this->provider = new YamlProvider($this);
+		$this->landManager = new LandManager($this, $this->provider);
 
-		$api = $this->getServer()->getPluginManager()->getPlugin('EconomyAPI');
-		if(!$api instanceof EconomyAPI) {
-			$this->getLogger()->warning('EconomyAPI is not loaded. EconomyLand will not be enabled because required plugin is not loaded.');
-			return;
+		$langFile = $this->getDataFolder() . "lang_" . $this->pluginConfig->getLanguage() . ".json";
+		if(!file_exists($langFile)) {
+			$langFile = $this->getDataFolder() . "lang_en.json";
 		}
+		$this->lang = new Config($langFile, Config::JSON);
 
-		$this->api = $api;
-
-		if(EconomyAPI::API_VERSION < 4) {
-			$this->getLogger()->warning('Current installed version of EconomyAPI is outdated. Please update EconomyAPI.');
-			$this->getLogger()->warning('Expected minimum API version: 4, got ' . EconomyAPI::API_VERSION);
-			return;
-		}
-
-		$this->loadLanguages();
-
-		if($this->landManager === null) {
-			$this->landManager = new LandManager($this, new YamlProvider($this));
-		}
-
-		$this->getServer()->getCommandMap()->register("economyland", new LandCommand($this));
 		$this->getServer()->getPluginManager()->registerEvents(new EventListener($this), $this);
+		$this->getServer()->getCommandMap()->register("economyland", new LandCommand($this));
+
+		$this->getScheduler()->scheduleRepeatingTask(
+			new LandUnloadTask($this->landManager),
+			$this->pluginConfig->getLandUnloadTaskPeriod()
+		);
 	}
 
-	public function getMessage(string $key, array $params = []): string {
-		if(isset($this->lang[$key])) {
-			return $this->api->replaceParameters($this->lang[$key], $params);
-		}elseif(isset($this->fallbackLang[$key])) {
-			return $this->api->replaceParameters($this->fallbackLang[$key], $params);
-		}
-
-		return $key;
-	}
-
-	private function loadLanguages() {
-		$lang = strtolower($this->pluginConfig->getLanguage());
-		if(!in_array($lang, ['en'])) {
-			$lang = self::FALLBACK_LANGUAGE;
-		}
-
-		$resource = $this->getResource('lang_' . $lang . '.json');
-		if($resource === null) {
-			$resource = $this->getResource('lang_en.json');
-		}
-
-		$this->lang = json_decode(stream_get_contents($resource), true);
-		fclose($resource);
-
-		$resource = $this->getResource('lang_en.json');
-		$this->fallbackLang = json_decode(stream_get_contents($resource), true);
-		fclose($resource);
-	}
-
-	public function onDisable() {
-		$this->landManager->close();
-	}
-
-	public function getPluginConfiguration(): PluginConfiguration {
-		return $this->pluginConfig;
+	public function getAPI(): EconomyAPI {
+		return $this->api;
 	}
 
 	public function getLandManager(): LandManager {
 		return $this->landManager;
+	}
+
+	public function getProvider(): Provider {
+		return $this->provider;
+	}
+
+	public function getPluginConfig(): PluginConfiguration {
+		return $this->pluginConfig;
+	}
+
+	public function getMessage(string $key, array $params = []): string {
+		$message = $this->lang->getNested($key, $key);
+		
+		foreach($params as $i => $param) {
+			$message = str_replace("{%" . ($i + 1) . "}", $param, $message);
+		}
+		
+		return $message;
+	}
+
+	public function onDisable() {
+		if($this->provider !== null) {
+			$this->provider->save();
+			$this->provider->close();
+		}
 	}
 }

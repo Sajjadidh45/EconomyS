@@ -23,99 +23,94 @@ namespace onebone\economyland\land;
 use onebone\economyland\EconomyLand;
 use onebone\economyland\provider\Provider;
 use onebone\economyland\task\LandUnloadTask;
-use pocketmine\level\Level;
+use pocketmine\world\World;
 use pocketmine\math\Vector2;
-use pocketmine\Player;
+use pocketmine\player\Player;
 
 class LandManager {
 	/** @var EconomyLand */
 	private $plugin;
-	/** @var Land[] */
-	private $lands = [];
 	/** @var Provider */
 	private $provider;
+	/** @var Land[] */
+	private $lands = [];
 
 	public function __construct(EconomyLand $plugin, Provider $provider) {
 		$this->plugin = $plugin;
 		$this->provider = $provider;
-
-		$plugin->getScheduler()->scheduleDelayedRepeatingTask(new LandUnloadTask($this),
-			$plugin->getPluginConfiguration()->getLandUnloadTaskPeriod(),
-			$plugin->getPluginConfiguration()->getLandUnloadTaskPeriod());
 	}
 
-	public function createLand(Vector2 $start, Vector2 $end, Level $world, Player $owner, LandOption $option, LandMeta $meta): Land {
-		return new Land($this->plugin, $this->provider->getNewId(),
-			$start, $end, $world, $owner->getName(), $option, $meta);
-	}
-
-	public function addLand(Land $land): void {
-		$this->provider->addLand($land);
-	}
-
-	public function setLand(Land $land): void {
-		$this->lands[$land->getId()] = $land;
-
-		$this->provider->setLand($land);
-	}
-
-	/**
-	 * @param string $id
-	 * @return Land[]
-	 */
-	public function matchLands(string $id): array {
-		return $this->provider->getMatches($id);
-	}
-
-	/**
-	 * @param string $owner
-	 * @return Land[]
-	 */
-	public function getLandsByOwner(string $owner): array {
-		return $this->provider->getLandsByOwner($owner);
-	}
-
-	public function getLandsOn(Vector2 $start, Vector2 $end, Level $level): array {
-		$lands = [];
-		foreach($this->lands as $land) {
-			if($level->getFolderName() !== $land->getWorldName()) continue;
-			if(($start->getX() <= $land->getStart()->getX() or $land->getEnd()->getX() <= $end->getX()) or
-				($start->getY() <= $land->getStart()->getY() or $land->getEnd()->getY() <= $end->getY())) {
-				$lands[] = $land;
-			}
-		}
-		return $lands;
-	}
-
-	public function getLandAt(int $x, int $z, string $worldName): ?Land {
-		foreach($this->lands as $land) {
-			if($land->isInside($x, $z, $worldName)) {
-				return $land;
-			}
+	public function getLand(string $id): ?Land {
+		if(isset($this->lands[$id])) {
+			return $this->lands[$id];
 		}
 
-		$land = $this->provider->getLandByPosition($x, $z, $worldName);
+		$land = $this->provider->getLand($id);
 		if($land !== null) {
-			$this->lands[$land->getId()] = $land;
+			$this->lands[$id] = $land;
 		}
 
 		return $land;
 	}
 
-	public function unloadLands() {
-		$now = microtime(true);
-		$boundary = $this->plugin->getPluginConfiguration()->getLandUnloadAfter();
+	public function getLandByPosition(int $x, int $z, string $worldName): ?Land {
+		foreach($this->lands as $land) {
+			if($land->getWorldName() === $worldName and $land->isInside(new Vector2($x, $z))) {
+				return $land;
+			}
+		}
 
-		$this->lands = array_filter($this->lands, function($val) use ($now, $boundary) {
-			return $now - $val->getLastAccess() < $boundary;
-		});
+		return $this->provider->getLandByPosition($x, $z, $worldName);
 	}
 
-	public function save() {
+	public function getLandsByOwner(string $owner): array {
+		return $this->provider->getLandsByOwner($owner);
+	}
+
+	public function addLand(Land $land): void {
+		$this->lands[$land->getId()] = $land;
+		$this->provider->addLand($land);
+	}
+
+	public function removeLand(string $id): bool {
+		if(isset($this->lands[$id])) {
+			unset($this->lands[$id]);
+		}
+
+		// Provider should handle removal
+		return true;
+	}
+
+	public function getMatches(string $id): array {
+		return $this->provider->getMatches($id);
+	}
+
+	public function checkCollision(Vector2 $start, Vector2 $end, string $worldName, ?string $excludeId = null): ?Land {
+		foreach($this->lands as $land) {
+			if($land->getWorldName() === $worldName and 
+			   ($excludeId === null or $land->getId() !== $excludeId) and 
+			   $land->checkCollision($start, $end)) {
+				return $land;
+			}
+		}
+
+		return null;
+	}
+
+	public function unloadLand(string $id): void {
+		if(isset($this->lands[$id])) {
+			$land = $this->lands[$id];
+			if(microtime(true) - $land->getLastAccess() > $this->plugin->getPluginConfig()->getLandUnloadAfter()) {
+				unset($this->lands[$id]);
+			}
+		}
+	}
+
+	public function save(): void {
 		$this->provider->save();
 	}
 
-	public function close() {
+	public function close(): void {
 		$this->provider->close();
 	}
 }

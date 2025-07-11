@@ -20,92 +20,22 @@
 
 namespace onebone\economyshop\provider;
 
-use pocketmine\level\Level;
-use pocketmine\level\Position;
+use pocketmine\world\World;
+use pocketmine\world\Position;
 use pocketmine\utils\Config;
 
 class YamlDataProvider implements DataProvider {
 	/** @var Config */
 	private $config;
-
+	/** @var string */
+	private $file;
+	/** @var bool */
 	private $save;
 
 	public function __construct(string $file, bool $save) {
-		$this->config = new Config($file, Config::YAML);
-
+		$this->file = $file;
 		$this->save = $save;
+		$this->config = new Config($file, Config::YAML);
 	}
 
-	public function addShop($x, $y = 0, $z = 0, $level = null, $data = []) {
-		if($x instanceof Position) {
-			$data = $y;
-
-			$y = $x->getFloorY();
-			$z = $x->getFloorZ();
-			$level = $x->getLevel();
-			$x = $x->getFloorX();
-		}
-		if($level instanceof Level) {
-			$level = $level->getFolderName();
-		}
-		if($this->config->exists($x . ":" . $y . ":" . $z . ":" . $level)) {
-			return false;
-		}
-
-		$this->config->set($x . ":" . $y . ":" . $z . ":" . $level, $data);
-		if($this->save) {
-			$this->save();
-		}
-		return true;
-	}
-
-	public function save() {
-		$this->config->save();
-	}
-
-	public function getShop($x, $y = 0, $z = 0, $level = null) {
-		if($x instanceof Position) {
-			$y = $x->getFloorY();
-			$z = $x->getFloorZ();
-			$level = $x->getLevel();
-			$x = $x->getFloorX();
-		}
-		if($level instanceof Level) {
-			$level = $level->getFolderName();
-		}
-		if(!$this->config->exists($x . ":" . $y . ":" . $z . ":" . $level)) {
-			return false;
-		}
-		return $this->config->get($x . ":" . $y . ":" . $z . ":" . $level);
-	}
-
-	public function getAll() {
-		return $this->config->getAll();
-	}
-
-	public function removeShop($x, $y = 0, $z = 0, $level = null) {
-		if($x instanceof Position) {
-			$y = $x->getFloorY();
-			$z = $x->getFloorZ();
-			$level = $x->getLevel();
-			$x = $x->getFloorX();
-		}
-		if($level instanceof Level) {
-			$level = $level->getFolderName();
-		}
-
-		if($this->config->exists($x . ":" . $y . ":" . $z . ":" . $level)) {
-			$this->config->remove($x . ":" . $y . ":" . $z . ":" . $level);
-			return true;
-		}
-		return false;
-	}
-
-	public function close() {
-		$this->save();
-	}
-
-	public function getProviderName() {
-		return "Yaml";
-	}
-}
+	public function addShop($x, $y = 0, $z = 0, $level = null, $data

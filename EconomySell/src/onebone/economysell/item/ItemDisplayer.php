@@ -20,14 +20,15 @@
 
 namespace onebone\economysell\item;
 
-use pocketmine\entity\Entity;
+use pocketmine\entity\EntityDataHelper;
+use pocketmine\entity\EntityFactory;
 use pocketmine\item\Item;
-use pocketmine\level\Level;
-use pocketmine\level\Position;
+use pocketmine\world\World;
+use pocketmine\world\Position;
 use pocketmine\math\Vector3;
 use pocketmine\network\mcpe\protocol\AddItemActorPacket;
 use pocketmine\network\mcpe\protocol\RemoveActorPacket;
-use pocketmine\Player;
+use pocketmine\player\Player;
 use pocketmine\Server;
 
 class ItemDisplayer {
@@ -45,35 +46,35 @@ class ItemDisplayer {
 		$this->item = $item;
 		$this->linked = $linked;
 
-		$this->eid = Entity::$entityCount++;
+		$this->eid = EntityDataHelper::nextRuntimeId();
 	}
 
-	public function spawnToAll(Level $level = null) {
-		foreach($level instanceof Level ? $level->getPlayers() : Server::getInstance()->getOnlinePlayers() as $player) {
+	public function spawnToAll(World $world = null) {
+		foreach($world instanceof World ? $world->getPlayers() : Server::getInstance()->getOnlinePlayers() as $player) {
 			$this->spawnTo($player);
 		}
 	}
 
 	public function spawnTo(Player $player) {
 		$pk = new AddItemActorPacket();
-		$pk->entityRuntimeId = $this->eid;
+		$pk->actorRuntimeId = $this->eid;
 		$pk->item = $this->item;
 		$pk->position = $this->pos->add(0.5, 0, 0.5);
 		$pk->motion = new Vector3(0, 0, 0);
 
-		$player->dataPacket($pk);
+		$player->getNetworkSession()->sendDataPacket($pk);
 	}
 
-	public function despawnFromAll(Level $level = null) {
-		foreach($level instanceof Level ? $level->getPlayers() : Server::getInstance()->getOnlinePlayers() as $player) {
+	public function despawnFromAll(World $world = null) {
+		foreach($world instanceof World ? $world->getPlayers() : Server::getInstance()->getOnlinePlayers() as $player) {
 			$this->despawnFrom($player);
 		}
 	}
 
 	public function despawnFrom(Player $player) {
 		$pk = new RemoveActorPacket();
-		$pk->entityUniqueId = $this->eid;
-		$player->dataPacket($pk);
+		$pk->actorUniqueId = $this->eid;
+		$player->getNetworkSession()->sendDataPacket($pk);
 	}
 
 	/**

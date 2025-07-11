@@ -20,92 +20,84 @@
 
 namespace onebone\economysell\provider;
 
-use pocketmine\level\Level;
-use pocketmine\level\Position;
+use pocketmine\world\World;
+use pocketmine\world\Position;
 use pocketmine\utils\Config;
 
 class YamlDataProvider implements DataProvider {
 	/** @var Config */
 	private $config;
-
+	/** @var string */
+	private $file;
+	/** @var bool */
 	private $save;
 
 	public function __construct(string $file, bool $save) {
-		$this->config = new Config($file, Config::YAML);
-
+		$this->file = $file;
 		$this->save = $save;
+		$this->config = new Config($file, Config::YAML);
 	}
 
 	public function addSell($x, $y = 0, $z = 0, $level = null, $data = []) {
 		if($x instanceof Position) {
-			$data = $y;
-
+			$level = $x->getWorld()->getFolderName();
 			$y = $x->getFloorY();
 			$z = $x->getFloorZ();
-			$level = $x->getLevel();
 			$x = $x->getFloorX();
-		}
-		if($level instanceof Level) {
+		} elseif($level instanceof World) {
 			$level = $level->getFolderName();
 		}
-		if($this->config->exists($x . ":" . $y . ":" . $z . ":" . $level)) {
-			return false;
-		}
 
-		$this->config->set($x . ":" . $y . ":" . $z . ":" . $level, $data);
+		$this->config->setNested("$level.$x.$y.$z", $data);
 		if($this->save) {
-			$this->save();
+			$this->config->save();
 		}
 		return true;
 	}
 
-	public function save() {
-		$this->config->save();
-	}
-
 	public function getSell($x, $y = 0, $z = 0, $level = null) {
 		if($x instanceof Position) {
+			$level = $x->getWorld()->getFolderName();
 			$y = $x->getFloorY();
 			$z = $x->getFloorZ();
-			$level = $x->getLevel();
 			$x = $x->getFloorX();
-		}
-		if($level instanceof Level) {
+		} elseif($level instanceof World) {
 			$level = $level->getFolderName();
 		}
-		if(!$this->config->exists($x . ":" . $y . ":" . $z . ":" . $level)) {
-			return false;
+
+		return $this->config->getNested("$level.$x.$y.$z");
+	}
+
+	public function removeSell($x, $y = 0, $z = 0, $level = null) {
+		if($x instanceof Position) {
+			$level = $x->getWorld()->getFolderName();
+			$y = $x->getFloorY();
+			$z = $x->getFloorZ();
+			$x = $x->getFloorX();
+		} elseif($level instanceof World) {
+			$level = $level->getFolderName();
 		}
-		return $this->config->get($x . ":" . $y . ":" . $z . ":" . $level);
+
+		$this->config->removeNested("$level.$x.$y.$z");
+		if($this->save) {
+			$this->config->save();
+		}
+		return true;
 	}
 
 	public function getAll() {
 		return $this->config->getAll();
 	}
 
-	public function removeSell($x, $y = 0, $z = 0, $level = null) {
-		if($x instanceof Position) {
-			$y = $x->getFloorY();
-			$z = $x->getFloorZ();
-			$level = $x->getLevel();
-			$x = $x->getFloorX();
-		}
-		if($level instanceof Level) {
-			$level = $level->getFolderName();
-		}
+	public function getProviderName() {
+		return "Yaml";
+	}
 
-		if($this->config->exists($x . ":" . $y . ":" . $z . ":" . $level)) {
-			$this->config->remove($x . ":" . $y . ":" . $z . ":" . $level);
-			return true;
-		}
-		return false;
+	public function save() {
+		$this->config->save();
 	}
 
 	public function close() {
-		$this->save();
-	}
-
-	public function getProviderName() {
-		return "Yaml";
+		$this->config->save();
 	}
 }

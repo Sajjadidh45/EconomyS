@@ -22,9 +22,9 @@ namespace onebone\economyland\land;
 
 use InvalidArgumentException;
 use onebone\economyland\EconomyLand;
-use pocketmine\level\Level;
+use pocketmine\world\World;
 use pocketmine\math\Vector2;
-use pocketmine\Player;
+use pocketmine\player\Player;
 
 final class Land {
 	/** @var EconomyLand */
@@ -35,7 +35,7 @@ final class Land {
 	private $start, $end;
 	/** @var string */
 	private $worldName;
-	/** @var Level */
+	/** @var World */
 	private $world = null;
 	/** @var string */
 	private $owner;
@@ -51,7 +51,7 @@ final class Land {
 	 * @param string $id
 	 * @param Vector2 $start
 	 * @param Vector2 $end
-	 * @param string|Level $world
+	 * @param string|World $world
 	 * @param string $owner
 	 * @param LandOption $option
 	 * @param LandMeta $meta
@@ -64,12 +64,12 @@ final class Land {
 		$this->start = new Vector2(min($start->x, $end->x), min($start->y, $end->y));
 		$this->end = new Vector2(max($start->x, $end->x), max($start->y, $end->y));
 
-		if($world instanceof Level) {
+		if($world instanceof World) {
 			$this->worldName = $world->getFolderName();
 			$this->world = $world;
 		}elseif(is_string($world)) {
 			$this->worldName = $world;
-			$this->world = $plugin->getServer()->getLevelByName($world);
+			$this->world = $plugin->getServer()->getWorldManager()->getWorldByName($world);
 		}else{
 			throw new InvalidArgumentException('Invalid $world variable type given to Land constructor');
 		}
@@ -105,11 +105,11 @@ final class Land {
 	 * Returns the world instance where land reside on.
 	 * This method may return null when world is deleted after
 	 * land is created.
-	 * @return Level|null
+	 * @return World|null
 	 */
-	public function getWorld(): ?Level {
+	public function getWorld(): ?World {
 		if($this->world === null) {
-			$this->world = $this->plugin->getServer()->getLevelByName($this->worldName);
+			$this->world = $this->plugin->getServer()->getWorldManager()->getWorldByName($this->worldName);
 		}
 
 		return $this->world;
@@ -160,13 +160,26 @@ final class Land {
 		$this->meta = $meta;
 	}
 
-	public function isInside(int $x, int $z, string $worldName): bool {
-		return $this->start->x <= $x and $x <= $this->end->x
-			and $this->start->y <= $z and $z <= $this->end->y
-			and $this->worldName === $worldName;
-	}
-
 	public function getLastAccess(): float {
 		return $this->lastAccess;
+	}
+
+	public function checkCollision(Vector2 $start, Vector2 $end): bool {
+		$start = new Vector2(min($start->x, $end->x), min($start->y, $end->y));
+		$end = new Vector2(max($start->x, $end->x), max($start->y, $end->y));
+
+		return !($this->end->x < $start->x or $this->start->x > $end->x or $this->end->y < $start->y or $this->start->y > $end->y);
+	}
+
+	public function isInside(Vector2 $pos): bool {
+		return $pos->x >= $this->start->x and $pos->x <= $this->end->x and $pos->y >= $this->start->y and $pos->y <= $this->end->y;
+	}
+
+	public function getPrice(): float {
+		return $this->meta->getPrice();
+	}
+
+	public function getSize(): int {
+		return ($this->end->x - $this->start->x + 1) * ($this->end->y - $this->start->y + 1);
 	}
 }

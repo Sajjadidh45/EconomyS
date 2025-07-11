@@ -38,402 +38,271 @@ use pocketmine\item\Item;
 use pocketmine\world\Position;
 use pocketmine\math\Vector3;
 use pocketmine\player\Player;
-use pocketmine\item\ItemFactory;
+use pocketmine\item\StringToItemParser;
 use pocketmine\plugin\PluginBase;
 use pocketmine\utils\TextFormat;
+use pocketmine\utils\Config;
+use pocketmine\block\tile\Sign;
+use pocketmine\block\utils\SignText;
 
 class EconomySell extends PluginBase implements Listener {
-	/**
-	 * @var DataProvider
-	 */
+	/** @var EconomyAPI */
+	private $api;
+	/** @var DataProvider */
 	private $provider;
-
+	/** @var ItemDisplayer[] */
+	private $displayers = [];
+	/** @var Config */
 	private $lang;
-
-	private $queue = [], $tap = [], $removeQueue = [], $placeQueue = [];
-
-	/** @var ItemDisplayer[][] */
-	private $items = [];
+	/** @var array */
+	private $tap = [];
 
 	public function onEnable() {
+		if(!file_exists($this->getDataFolder())) {
+			mkdir($this->getDataFolder());
+		}
+
+		$this->api = EconomyAPI::getInstance();
+		if($this->api === null) {
+			$this->getLogger()->critical("EconomyAPI plugin not found!");
+			$this->getServer()->getPluginManager()->disablePlugin($this);
+			return;
+		}
+
 		$this->saveDefaultConfig();
+		$this->saveResource("ShopText.yml");
 
-		if(!$this->selectLang()) {
-			$this->getLogger()->warning("Invalid language option was given.");
-		}
-
-		$provider = $this->getConfig()->get("data-provider");
-		switch (strtolower($provider)) {
-			case "yaml":
-				$this->provider = new YamlDataProvider($this->getDataFolder() . "Sells.yml", $this->getConfig()->get("auto-save"));
-				break;
-			default:
-				$this->getLogger()->critical("Invalid data provider was given. EconomySell will be terminated.");
-				return;
-		}
-		$this->getLogger()->notice("Data provider was set to: " . $this->provider->getProviderName());
-
-		$levels = [];
-		foreach($this->provider->getAll() as $sell) {
-			if($sell[9] !== -2) {
-				if(!isset($levels[$sell[3]])) {
-					$levels[$sell[3]] = $this->getServer()->getWorldManager()->getWorldByName($sell[3]);
-				}
-				$pos = new Position($sell[0], $sell[1], $sell[2], $levels[$sell[3]]);
-				$display = $pos;
-				if($sell[9] !== -1) {
-					$display = $pos->getSide($sell[9]);
-				}
-				$this->items[$sell[3]][] = new ItemDisplayer($display, ItemFactory::getInstance()->get($sell[4], $sell[5]), $pos);
-			}
-		}
+		$this->provider = new YamlDataProvider($this->getDataFolder() . "Sells.yml", true);
 
 		$this->getServer()->getPluginManager()->registerEvents($this, $this);
-	}
 
-	private function selectLang() {
-		foreach(preg_grep("/.*lang_.{2}\\.json$/", $this->getResources()) as $resource) {
-			$lang = substr($resource, -7, -5);
-			if($this->getConfig()->get("lang", "en") === $lang) {
-				$this->lang = json_decode((stream_get_contents($rsc = $this->getResource("lang_" . $lang . ".json"))), true);
-				@fclose($rsc);
-				return true;
+		foreach($this->provider->getAll() as $level => $sells) {
+			if(!is_array($sells)) continue;
+			foreach($sells as $x => $xData) {
+				if(!is_array($xData)) continue;
+				foreach($xData as $y => $yData) {
+					if(!is_array($yData)) continue;
+					foreach($yData as $z => $sell) {
+						if(!is_array($sell)) continue;
+						$pos = new Position((int)$x, (int)$y, (int)$z, $this->getServer()->getWorldManager()->getWorldByName($level));
+						if($pos->getWorld() === null) continue;
+
+						$item = StringToItemParser::getInstance()->parse($sell["item"] ?? "");
+						if($item === null) continue;
+
+						$this->displayers[] = new ItemDisplayer($pos, $item, $pos);
+					}
+				}
 			}
 		}
-		$this->lang = json_decode((stream_get_contents($rsc = $this->getResource("lang_en.json"))), true);
-		@fclose($rsc);
-		return false;
 	}
 
-	public function onCommand(CommandSender $sender, Command $command, string $label, array $params): bool {
-		switch ($command->getName()) {
+	public function onJoin(PlayerJoinEvent $event) {
+		$player = $event->getPlayer();
+		foreach($this->displayers as $displayer) {
+			$displayer->spawnTo($player);
+		}
+	}
+
+	public function onCommand(CommandSender $sender, Command $command, string $label, array $args): bool {
+		switch($command->getName()) {
 			case "sell":
-				switch (strtolower(array_shift($params))) {
+				if(!$sender instanceof Player) {
+					$sender->sendMessage(TextFormat::RED . "Please run this command in-game.");
+					return false;
+				}
+
+				if(!isset($args[0])) {
+					$sender->sendMessage(TextFormat::RED . "Usage: /sell <create|remove>");
+					return false;
+				}
+
+				switch(strtolower($args[0])) {
 					case "create":
-					case "cr":
 					case "c":
-						if(!$sender instanceof Player) {
-							$sender->sendMessage(TextFormat::RED . "Please run this command in-game.");
-							return true;
-						}
 						if(!$sender->hasPermission("economysell.command.sell.create")) {
-							$sender->sendMessage(TextFormat::RED . "You don't have permission to run this command.");
-							return true;
-						}
-						if(isset($this->queue[strtolower($sender->getName())])) {
-							unset($this->queue[strtolower($sender->getName())]);
-							$sender->sendMessage($this->getMessage("removed-queue"));
-							return true;
-						}
-						$item = array_shift($params);
-						$amount = array_shift($params);
-						$price = array_shift($params);
-						$side = array_shift($params);
-
-						if(trim($item) === "" or trim($amount) === "" or trim($price) === "" or !is_numeric($amount) or !is_numeric($price)) {
-							$sender->sendMessage("Usage: /sell create <item[:damage]> <amount> <price> [side]");
-							return true;
+							$sender->sendMessage(TextFormat::RED . "You don't have permission to create sell points.");
+							return false;
 						}
 
-						if(trim($side) === "") {
-							$side = Vector3::SIDE_UP;
-						}else{
-							switch (strtolower($side)) {
-								case "up":
-								case Vector3::SIDE_UP:
-									$side = Vector3::SIDE_UP;
-									break;
-								case "down":
-								case Vector3::SIDE_DOWN:
-									$side = Vector3::SIDE_DOWN;
-									break;
-								case "west":
-								case Vector3::SIDE_WEST:
-									$side = Vector3::SIDE_WEST;
-									break;
-								case "east":
-								case Vector3::SIDE_EAST:
-									$side = Vector3::SIDE_EAST;
-									break;
-								case "north":
-								case Vector3::SIDE_NORTH:
-									$side = Vector3::SIDE_NORTH;
-									break;
-								case "south":
-								case Vector3::SIDE_SOUTH:
-									$side = Vector3::SIDE_SOUTH;
-									break;
-								case "sell":
-								case -1:
-									$side = -1;
-									break;
-								case "none":
-								case -2:
-									$side = -2;
-									break;
-								default:
-									$sender->sendMessage($this->getMessage("invalid-side"));
-									return true;
-							}
+						if(!isset($args[1]) or !isset($args[2])) {
+							$sender->sendMessage(TextFormat::RED . "Usage: /sell create <item> <price>");
+							return false;
 						}
-						$this->queue[strtolower($sender->getName())] = [
-								$item, (int) $amount, $price, (int) $side
+
+						$item = StringToItemParser::getInstance()->parse($args[1]);
+						if($item === null) {
+							$sender->sendMessage(TextFormat::RED . "Invalid item: " . $args[1]);
+							return false;
+						}
+
+						if(!is_numeric($args[2]) or $args[2] < 0) {
+							$sender->sendMessage(TextFormat::RED . "Price must be a positive number.");
+							return false;
+						}
+
+						$price = (float) $args[2];
+
+						$pos = $sender->getPosition();
+						$sell = [
+							"item" => $args[1],
+							"price" => $price,
+							"creator" => $sender->getName()
 						];
-						$sender->sendMessage($this->getMessage("added-queue"));
-						return true;
-					case "remove":
-					case "rm":
-					case "r":
-					case "delete":
-					case "del":
-					case "d":
-						if(!$sender instanceof Player) {
-							$sender->sendMessage(TextFormat::RED . "Please run this command in-game.");
-							return true;
-						}
-						if(!$sender->hasPermission("economysell.command.sell.remove")) {
-							$sender->sendMessage(TextFormat::RED . "You don't have permission to run this command.");
-							return true;
-						}
-						if(isset($this->removeQueue[strtolower($sender->getName())])) {
-							unset($this->removeQueue[strtolower($sender->getName())]);
-							$sender->sendMessage($this->getMessage("removed-rm-queue"));
-							return true;
-						}
-						$this->removeQueue[strtolower($sender->getName())] = true;
-						$sender->sendMessage($this->getMessage("added-rm-queue"));
-						return true;
-					case "list":
 
+						$event = new SellCreationEvent($this, $sell, $sender);
+						$event->call();
+
+						if($event->isCancelled()) {
+							return false;
+						}
+
+						$this->provider->addSell($pos, $sell);
+						$this->displayers[] = new ItemDisplayer($pos, $item, $pos);
+
+						$sender->sendMessage(TextFormat::GREEN . "Sell point created successfully!");
+						return true;
+
+					case "remove":
+					case "r":
+						if(!$sender->hasPermission("economysell.command.sell.remove")) {
+							$sender->sendMessage(TextFormat::RED . "You don't have permission to remove sell points.");
+							return false;
+						}
+
+						$pos = $sender->getPosition();
+						$sell = $this->provider->getSell($pos);
+
+						if($sell === null) {
+							$sender->sendMessage(TextFormat::RED . "No sell point found at this location.");
+							return false;
+						}
+
+						if($sell["creator"] !== $sender->getName() and !$sender->hasPermission("economysell.admin")) {
+							$sender->sendMessage(TextFormat::RED . "You can only remove your own sell points.");
+							return false;
+						}
+
+						$this->provider->removeSell($pos);
+						$sender->sendMessage(TextFormat::GREEN . "Sell point removed successfully!");
 						return true;
 				}
+				break;
 		}
-
 		return false;
 	}
 
-	public function getMessage($key, $replacement = []) {
-		$key = strtolower($key);
-		if(isset($this->lang[$key])) {
-			$search = [];
-			$replace = [];
-			$this->replaceColors($search, $replace);
-
-			$search[] = "%MONETARY_UNIT%";
-			$replace[] = EconomyAPI::getInstance()->getMonetaryUnit();
-
-			for ($i = 1; $i <= count($replacement); $i++) {
-				$search[] = "%" . $i;
-				$replace[] = $replacement[$i - 1];
-			}
-			return str_replace($search, $replace, $this->lang[$key]);
-		}
-		return "Could not find \"$key\".";
-	}
-
-	private function replaceColors(&$search = [], &$replace = []) {
-		$colors = [
-				"BLACK" => "0",
-				"DARK_BLUE" => "1",
-				"DARK_GREEN" => "2",
-				"DARK_AQUA" => "3",
-				"DARK_RED" => "4",
-				"DARK_PURPLE" => "5",
-				"GOLD" => "6",
-				"GRAY" => "7",
-				"DARK_GRAY" => "8",
-				"BLUE" => "9",
-				"GREEN" => "a",
-				"AQUA" => "b",
-				"RED" => "c",
-				"LIGHT_PURPLE" => "d",
-				"YELLOW" => "e",
-				"WHITE" => "f",
-				"OBFUSCATED" => "k",
-				"BOLD" => "l",
-				"STRIKETHROUGH" => "m",
-				"UNDERLINE" => "n",
-				"ITALIC" => "o",
-				"RESET" => "r"
-		];
-		foreach($colors as $color => $code) {
-			$search[] = "%%" . $color . "%%";
-			$search[] = "&" . $code;
-
-			$replace[] = TextFormat::ESCAPE . $code;
-			$replace[] = TextFormat::ESCAPE . $code;
-		}
-	}
-
-	public function onPlayerJoin(PlayerJoinEvent $event) {
-		$player = $event->getPlayer();
-		$level = $player->getWorld()->getFolderName();
-
-		if(isset($this->items[$level])) {
-			foreach($this->items[$level] as $displayer) {
-				$displayer->spawnTo($player);
-			}
-		}
-	}
-
-	public function onPlayerTeleport(EntityTeleportEvent $event) {
-		$player = $event->getEntity();
-		if($player instanceof Player) {
-			if(($from = $event->getFrom()->getWorld()) !== ($to = $event->getTo()->getWorld())) {
-				if($from !== null and isset($this->items[$from->getFolderName()])) {
-					foreach($this->items[$from->getFolderName()] as $displayer) {
-						$displayer->despawnFrom($player);
-					}
-				}
-				if($to !== null and isset($this->items[$to->getFolderName()])) {
-					foreach($this->items[$to->getFolderName()] as $displayer) {
-						$displayer->spawnTo($player);
-					}
-				}
-			}
-		}
-	}
-
-	public function onBlockTouch(PlayerInteractEvent $event) {
-		if($event->getAction() !== PlayerInteractEvent::RIGHT_CLICK_BLOCK) {
-			return;
-		}
-
+	public function onInteract(PlayerInteractEvent $event) {
 		$player = $event->getPlayer();
 		$block = $event->getBlock();
+		$pos = $block->getPosition();
 
-		$iusername = strtolower($player->getName());
-
-		if(isset($this->queue[$iusername])) {
-			$queue = $this->queue[$iusername];
-			$itemData = explode(":", $queue[0]);
-			$item = ItemFactory::getInstance()->get((int)$itemData[0], (int)($itemData[1] ?? 0), $queue[1]);
-
-			$ev = new SellCreationEvent($block, $item, $queue[2], $queue[3]);
-			$this->getServer()->getPluginManager()->callEvent($ev);
-
-			if($ev->isCancelled()) {
-				$player->sendMessage($this->getMessage("sell-create-failed"));
-				unset($this->queue[$iusername]);
-				return;
-			}
-			$result = $this->provider->addSell($block, [
-					$block->getPosition()->getX(), $block->getPosition()->getY(), $block->getPosition()->getZ(), $block->getPosition()->getWorld()->getFolderName(),
-					$item->getId(), $item->getMeta(), $item->getName(), $queue[1], $queue[2], $queue[3]
-			]);
-
-			if($result) {
-				if($queue[3] !== -2) {
-					$pos = $block;
-					if($queue[3] !== -1) {
-						$pos = $block->getSide($queue[3]);
-					}
-
-					$this->items[$pos->getWorld()->getFolderName()][] = ($dis = new ItemDisplayer($pos, $item, $block));
-					$dis->spawnToAll($pos->getWorld());
-				}
-
-				$player->sendMessage($this->getMessage("sell-created"));
-			}else{
-				$player->sendMessage($this->getMessage("sell-already-exist"));
-			}
-
-			if($event->getItem()->canBePlaced()) {
-				$this->placeQueue[$iusername] = true;
-			}
-
-			unset($this->queue[$iusername]);
-			return;
-		} elseif(isset($this->removeQueue[$iusername])) {
-			$sell = $this->provider->getSell($block);
-			foreach($this->items as $level => $arr) {
-				foreach($arr as $key => $displayer) {
-					$link = $displayer->getLinked();
-					if($link->getX() === $sell[0] and $link->getY() === $sell[1] and $link->getZ() === $sell[2] and $link->getWorld()->getFolderName() === $sell[3]) {
-						$displayer->despawnFromAll();
-						unset($this->items[$key]);
-						break 2;
-					}
-				}
-			}
-
-			$this->provider->removeSell($block);
-
-			unset($this->removeQueue[$iusername]);
-			$player->sendMessage($this->getMessage("sell-removed"));
-
-			if($event->getItem()->canBePlaced()) {
-				$this->placeQueue[$iusername] = true;
-			}
+		if(isset($this->tap[$player->getName()])) {
+			$this->tap[$player->getName()] = $pos;
+			$player->sendMessage(TextFormat::GREEN . "Position selected! Use /sell create <item> <price> to create a sell point here.");
+			$event->cancel();
 			return;
 		}
 
-		if(($sell = $this->provider->getSell($block)) !== false) {
-			if($this->getConfig()->get("enable-double-tap")) {
-				$now = time();
-				if(isset($this->tap[$iusername]) and $now - $this->tap[$iusername] < 1) {
-					$this->sellItem($player, $sell);
-					unset($this->tap[$iusername]);
-				}else{
-					$this->tap[$iusername] = $now;
-					$player->sendMessage($this->getMessage("tap-again", [$sell[6], $sell[7], $sell[8]]));
-				}
-			}else{
-				$this->sellItem($player, $sell);
-			}
+		$sell = $this->provider->getSell($pos);
+		if($sell === null) return;
 
-			if($event->getItem()->canBePlaced()) {
-				$this->placeQueue[$iusername] = true;
-			}
+		$event->cancel();
+
+		$item = StringToItemParser::getInstance()->parse($sell["item"]);
+		if($item === null) return;
+
+		$playerItem = $player->getInventory()->getItemInHand();
+		if(!$playerItem->equals($item, true, false)) {
+			$player->sendMessage(TextFormat::RED . "You need to hold " . $item->getName() . " to sell here!");
+			return;
 		}
+
+		if($playerItem->getCount() < 1) {
+			$player->sendMessage(TextFormat::RED . "You don't have any " . $item->getName() . " to sell!");
+			return;
+		}
+
+		$sellAmount = min($playerItem->getCount(), 64);
+		$totalPrice = $sell["price"] * $sellAmount;
+
+		$transactionEvent = new SellTransactionEvent($this, $sell, $player, $item, $totalPrice);
+		$transactionEvent->call();
+
+		if($transactionEvent->isCancelled()) {
+			return;
+		}
+
+		$playerItem->setCount($playerItem->getCount() - $sellAmount);
+		$player->getInventory()->setItemInHand($playerItem);
+
+		$this->api->addMoney($player, $totalPrice);
+
+		$player->sendMessage(TextFormat::GREEN . "You sold " . $item->getName() . " x" . $sellAmount . " for $" . $totalPrice);
 	}
 
-	private function sellItem(Player $player, $sell) {
-		if(!$player instanceof Player) {
-			return false;
-		}
-		if(!$player->hasPermission("economysell.sell.sell")) {
-			$player->sendMessage($this->getMessage("no-permission-sell"));
-			return false;
-		}
-		$item = ItemFactory::getInstance()->get($sell[4], $sell[5], $sell[7]);
-		if($player->getInventory()->contains($item)) {
-			$ev = new SellTransactionEvent($player, new Position($sell[0], $sell[1], $sell[2], $this->getServer()->getWorldManager()->getWorldByName($sell[3])), $item, $sell[8]);
-			$this->getServer()->getPluginManager()->callEvent($ev);
-			if($ev->isCancelled()) {
-				$player->sendMessage($this->getMessage("failed-sell"));
-				return true;
-			}
-			$player->getInventory()->removeItem($item);
-			$player->sendMessage($this->getMessage("sold-item", [$sell[6], $sell[7], $sell[8]]));
-			EconomyAPI::getInstance()->addMoney($player, $sell[8], null, null, true);
-		}else{
-			$player->sendMessage($this->getMessage("no-item", [$sell[6]]));
-		}
-		return true;
-	}
+	public function onBreak(BlockBreakEvent $event) {
+		$pos = $event->getBlock()->getPosition();
+		$sell = $this->provider->getSell($pos);
 
-	public function onBlockPlace(BlockPlaceEvent $event) {
-		$iusername = strtolower($event->getPlayer()->getName());
-		if(isset($this->placeQueue[$iusername])) {
-			$event->setCancelled();
-			unset($this->placeQueue[$iusername]);
-		}
-	}
-
-	public function onBlockBreak(BlockBreakEvent $event) {
-		$block = $event->getBlock();
-		if($this->provider->getSell($block) !== false) {
+		if($sell !== null) {
 			$player = $event->getPlayer();
-
-			$event->setCancelled(true);
-			$player->sendMessage($this->getMessage("sell-breaking-forbidden"));
+			if($sell["creator"] !== $player->getName() and !$player->hasPermission("economysell.admin")) {
+				$event->cancel();
+				$player->sendMessage(TextFormat::RED . "You cannot break this sell point!");
+			} else {
+				$this->provider->removeSell($pos);
+				$player->sendMessage(TextFormat::GREEN . "Sell point removed!");
+			}
 		}
+	}
+
+	public function onPlace(BlockPlaceEvent $event) {
+		$player = $event->getPlayer();
+		$block = $event->getBlock();
+
+		if($block instanceof Sign) {
+			$pos = $block->getPosition();
+			$sell = $this->provider->getSell($pos);
+
+			if($sell !== null) {
+				$item = StringToItemParser::getInstance()->parse($sell["item"]);
+				if($item !== null) {
+					$lines = [
+						"[SELL]",
+						$item->getName(),
+						"Price: $" . $sell["price"],
+						"Creator: " . $sell["creator"]
+					];
+					
+					$signText = new SignText($lines);
+					$block->setText($signText);
+				}
+			}
+		}
+	}
+
+	public function onTeleport(EntityTeleportEvent $event) {
+		$entity = $event->getEntity();
+		if($entity instanceof Player) {
+			foreach($this->displayers as $displayer) {
+				$displayer->despawnFrom($entity);
+				$displayer->spawnTo($entity);
+			}
+		}
+	}
+
+	public function getAPI(): EconomyAPI {
+		return $this->api;
+	}
+
+	public function getProvider(): DataProvider {
+		return $this->provider;
 	}
 
 	public function onDisable() {
-		if($this->provider instanceof DataProvider) {
-			$this->provider->close();
+		if($this->provider !== null) {
+			$this->provider->save();
 		}
 	}
 }
