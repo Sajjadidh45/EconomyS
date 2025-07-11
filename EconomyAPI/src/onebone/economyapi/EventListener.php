@@ -23,6 +23,14 @@ namespace onebone\economyapi;
 use pocketmine\event\Listener;
 use pocketmine\event\player\PlayerJoinEvent;
 use pocketmine\event\player\PlayerQuitEvent;
+<<<<<<< HEAD
+=======
+use pocketmine\event\server\DataPacketSendEvent;
+use pocketmine\network\mcpe\protocol\AvailableCommandsPacket;
+use pocketmine\network\mcpe\protocol\types\command\CommandEnum;
+use pocketmine\network\mcpe\protocol\types\command\CommandParameter;
+use pocketmine\player\Player;
+>>>>>>> 1011d39ed1ea3ab6f6329818ddb2078ec03b1144
 
 class EventListener implements Listener {
 	/** @var EconomyAPI */

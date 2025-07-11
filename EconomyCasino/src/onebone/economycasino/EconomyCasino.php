@@ -24,6 +24,10 @@ use onebone\economyapi\EconomyAPI;
 use pocketmine\command\Command;
 use pocketmine\command\CommandSender;
 use pocketmine\event\Listener;
+<<<<<<< HEAD
+=======
+use pocketmine\event\player\PlayerQuitEvent;
+>>>>>>> 1011d39ed1ea3ab6f6329818ddb2078ec03b1144
 use pocketmine\player\Player;
 use pocketmine\plugin\PluginBase;
 use pocketmine\utils\TextFormat;
