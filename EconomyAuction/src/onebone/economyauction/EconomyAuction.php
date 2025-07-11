@@ -21,10 +21,12 @@
 namespace onebone\economyauction;
 
 use onebone\economyapi\EconomyAPI;
+use onebone\economyapi\event\CommandIssuer;
 use pocketmine\command\Command;
 use pocketmine\command\CommandSender;
 use pocketmine\item\Item;
-use pocketmine\Player;
+use pocketmine\item\ItemFactory;
+use pocketmine\player\Player;
 use pocketmine\plugin\PluginBase;
 use pocketmine\utils\TextFormat;
 
@@ -60,7 +62,7 @@ class EconomyAuction extends PluginBase {
 
 		foreach($this->auctions as $player => $data) {
 			if(isset($this->auctions[$player][6])) {
-				$id = $this->getScheduler()->scheduleDelayedTask(new QuitAuctionTask($this, $player), $this->auctions[$player][6])->getTaskId();
+				$id = $this->getScheduler()->scheduleDelayedTask(new QuitAuctionTask($this, $player), $this->auctions[$player][6])->getHandler()->getTaskId();
 				$this->auctions[$player][7] = time();
 				$this->auctions[$player][8] = $id;
 			}
@@ -107,7 +109,8 @@ class EconomyAuction extends PluginBase {
 						}
 
 						$count = (int) $count;
-						$item = Item::fromString($item);
+						$itemData = explode(":", $item);
+						$item = ItemFactory::getInstance()->get((int)$itemData[0], (int)($itemData[1] ?? 0), 1);
 
 						$cnt = 0;
 						foreach($sender->getInventory()->getContents() as $i) {
@@ -123,10 +126,10 @@ class EconomyAuction extends PluginBase {
 							$sender->getInventory()->removeItem($item);
 
 							$this->auctions[strtolower($sender->getName())] = array(
-									$item->getID(), $item->getDamage(), $count, (float) $startPrice, null, (float) $startPrice, null, null
+									$item->getId(), $item->getMeta(), $count, (float) $startPrice, null, (float) $startPrice, null, null
 							);
 							$this->getServer()->broadcastMessage(TextFormat::GREEN . $sender->getName() . TextFormat::RESET . "'s auction has just started.");
-							EconomyAPI::getInstance()->reduceMoney($sender, $tax);
+							EconomyAPI::getInstance()->reduceMoney($sender, $tax, null, new CommandIssuer($sender, "auction", "start ..."));
 						}else{
 							$sender->sendMessage("You don't have enough items");
 						}
@@ -165,7 +168,8 @@ class EconomyAuction extends PluginBase {
 							$sender->sendMessage("Usage: /auction time <item> <count> <start price> <time>");
 							break;
 						}
-						$item = Item::fromString($item);
+						$itemData = explode(":", $item);
+						$item = ItemFactory::getInstance()->get((int)$itemData[0], (int)($itemData[1] ?? 0), 1);
 						$count = (int) $count;
 
 						$cnt = 0;
@@ -181,9 +185,9 @@ class EconomyAuction extends PluginBase {
 						if($count <= $cnt) {
 							$item->setCount($count);
 							$sender->getInventory()->removeItem($item);
-							$id = $this->getScheduler()->scheduleDelayedTask(new QuitAuctionTask($this, $sender->getName()), ($time * 20))->getTaskId();
+							$id = $this->getScheduler()->scheduleDelayedTask(new QuitAuctionTask($this, $sender->getName()), ($time * 20))->getHandler()->getTaskId();
 							$this->auctions[strtolower($sender->getName())] = array(
-									$item->getID(), $item->getDamage(), $count, (float) $startPrice, null, (float) $startPrice, $time, time(), $id
+									$item->getId(), $item->getMeta(), $count, (float) $startPrice, null, (float) $startPrice, $time, time(), $id
 							);
 							$this->getServer()->broadcastMessage($sender->getName() . "'s auction has just started.");
 						}else{
@@ -234,21 +238,21 @@ class EconomyAuction extends PluginBase {
 	}
 
 	public function quitAuction($auction) {
-		if($this->auctions[$auction][7] !== null) {
-			$this->getScheduler()->cancelTask($this->auctions[$auction][7]);
+		if($this->auctions[$auction][8] !== null) {
+			$this->getScheduler()->cancelTask($this->auctions[$auction][8]);
 		}
 		if($this->auctions[$auction][4] !== null) {
 			$p = $this->getServer()->getPlayerExact($this->auctions[$auction][4]);
 			if($p instanceof Player) {
 				$p->getInventory()->addItem(new Item($this->auctions[$auction][0], $this->auctions[$auction][1], $this->auctions[$auction][2]));
-				EconomyAPI::getInstance()->reduceMoney($p, $this->auctions[$auction][5], true, "EconomyAuction");
+				EconomyAPI::getInstance()->reduceMoney($p, $this->auctions[$auction][5], null, null, true);
 				$p->sendMessage("You've got item from the auction");
 			}else{
 				$this->queue[$this->auctions[$auction][4]] = array(
 						$this->auctions[$auction][0], $this->auctions[$auction][1], $this->auctions[$auction][2]
 				);
 			}
-			EconomyAPI::getInstance()->addMoney($auction, $this->auctions[$auction][5], true, "EconomyAuction");
+			EconomyAPI::getInstance()->addMoney($auction, $this->auctions[$auction][5], null, null, true);
 		}else{
 			$p = $this->getServer()->getPlayerExact($auction);
 			if($p instanceof Player) {
@@ -260,8 +264,8 @@ class EconomyAuction extends PluginBase {
 				);
 			}
 		}
-		if(isset($this->auctions[$auction][7])) {
-			$this->getScheduler()->cancelTask($this->auctions[$auction][7]);
+		if(isset($this->auctions[$auction][8])) {
+			$this->getScheduler()->cancelTask($this->auctions[$auction][8]);
 		}
 		unset($this->auctions[$auction]);
 	}

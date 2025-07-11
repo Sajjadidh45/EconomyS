@@ -25,8 +25,8 @@ use pocketmine\event\player\PlayerJoinEvent;
 use pocketmine\event\player\PlayerQuitEvent;
 use pocketmine\event\server\DataPacketSendEvent;
 use pocketmine\network\mcpe\protocol\AvailableCommandsPacket;
-use pocketmine\network\mcpe\protocol\types\command\CommandEnum;
-use pocketmine\network\mcpe\protocol\types\command\CommandParameter;
+use pocketmine\network\mcpe\protocol\types\CommandEnum;
+use pocketmine\network\mcpe\protocol\types\CommandParameter;
 use pocketmine\player\Player;
 
 class EventListener implements Listener {
@@ -37,7 +37,7 @@ class EventListener implements Listener {
 		$this->plugin = $plugin;
 	}
 
-	public function onDataPacketSend(DataPacketSendEvent $event) {
+	/*public function onDataPacketSend(DataPacketSendEvent $event) {
 		$pk = $event->getPacket();
 		if(!$pk instanceof AvailableCommandsPacket) return;
 
@@ -160,21 +160,21 @@ class EventListener implements Listener {
 
 			$pk->commandData['economy'] = $data;
 		}
-	}
+	}*/
 
 	/** @noinspection PhpUnusedParameterInspection */
-	public function onPlayerJoin(PlayerJoinEvent $_) {
+	/*public function onPlayerJoin(PlayerJoinEvent $_) {
 		foreach($this->plugin->getServer()->getOnlinePlayers() as $player) {
 			$player->sendCommandData();
 		}
-	}
+	}*/
 
 	/** @noinspection PhpUnusedParameterInspection */
-	public function onPlayerQuit(PlayerQuitEvent $_) {
+	/*public function onPlayerQuit(PlayerQuitEvent $_) {
 		foreach($this->plugin->getServer()->getOnlinePlayers() as $player) {
 			$player->sendCommandData();
 		}
-	}
+	}*/
 
 	public static function also($object, $block) {
 		$block($object);

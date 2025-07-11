@@ -27,7 +27,7 @@ use onebone\economyapi\util\Promise;
 use onebone\economyapi\util\Transaction;
 use onebone\economyapi\util\TransactionAction;
 use onebone\economyapi\util\TransactionResult;
-use pocketmine\player\Player;
+use pocketmine\Player;
 use pocketmine\utils\Config;
 
 class YamlProvider implements Provider {

@@ -21,6 +21,7 @@
 namespace onebone\economycasino;
 
 use onebone\economyapi\EconomyAPI;
+use onebone\economyapi\event\CommandIssuer;
 use pocketmine\command\Command;
 use pocketmine\command\CommandSender;
 use pocketmine\event\Listener;
@@ -237,12 +238,12 @@ class EconomyCasino extends PluginBase implements Listener {
 							$all = 0;
 							foreach($this->casino[$sender->getName()]["players"] as $player => $v) {
 								$tmp = min($money, $this->api->myMoney($player));
-								$this->api->reduceMoney($player, $tmp);
+								$this->api->reduceMoney($player, $tmp, null, new CommandIssuer($sender, "casino", "gamble ..."));
 								$all += $tmp;
 							}
 							$got = array_rand($this->casino[$sender->getName()]["players"]);
 
-							$this->api->addMoney($got, $all, true, "EconomyCasino");
+							$this->api->addMoney($got, $all, null, new CommandIssuer($sender, "casino", "gamble ..."), true);
 
 							foreach($this->casino[$sender->getName()]["players"] as $p => $v) {
 								if($got === $p) {
@@ -257,11 +258,11 @@ class EconomyCasino extends PluginBase implements Listener {
 									$all = 0;
 									foreach($this->casino[$player]["players"] as $p => $true) {
 										$tmp = min($this->api->myMoney($p), $money);
-										$this->api->reduceMoney($p, $tmp);
+										$this->api->reduceMoney($p, $tmp, null, new CommandIssuer($sender, "casino", "gamble ..."));
 										$all += $tmp;
 									}
 									$got = array_rand($this->casino[$player]["players"]);
-									$this->api->addMoney($got, $all, true, "EconomyCasino");
+									$this->api->addMoney($got, $all, null, new CommandIssuer($sender, "casino", "gamble ..."), true);
 									foreach($this->casino[$player]["players"] as $p => $v) {
 										if($got === $p) {
 											$this->getServer()->getPlayerExact($p)->sendMessage("You've win " . $this->api->getMonetaryUnit() . "$all!");
@@ -295,10 +296,10 @@ class EconomyCasino extends PluginBase implements Listener {
 
 				$rand = rand(0, $this->config->get("jackpot-winning"));
 				if($rand === 0) {
-					$this->api->addMoney($sender, $money);
+					$this->api->addMoney($sender, $money, null, new CommandIssuer($sender, "jackpot", "..."));
 					$sender->sendMessage("You've wined jackpot! You've got " . $this->api->getMonetaryUnit() . "$money");
 				}else{
-					$this->api->reduceMoney($sender, $money);
+					$this->api->reduceMoney($sender, $money, null, new CommandIssuer($sender, "jackpot", "..."));
 					$sender->sendMessage("You've failed your jackpot! You've lost " . $this->api->getMonetaryUnit() . "$money");
 				}
 				break;

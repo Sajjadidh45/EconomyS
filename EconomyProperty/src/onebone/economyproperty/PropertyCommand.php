@@ -22,24 +22,21 @@ namespace onebone\economyproperty;
 
 use pocketmine\command\Command;
 use pocketmine\command\CommandSender;
-use pocketmine\command\PluginIdentifiableCommand;
-use pocketmine\level\Level;
-use pocketmine\Player;
+use pocketmine\player\Player;
 use pocketmine\plugin\Plugin;
 use pocketmine\Server;
 use pocketmine\utils\TextFormat;
+use pocketmine\world\World;
 
-class PropertyCommand extends Command implements PluginIdentifiableCommand {
-	private $plugin;
-	private $command, $pos1, $pos2, $make, $touchPos;
+class PropertyCommand extends Command {
+	private EconomyProperty $plugin;
+	private string $command, $pos1, $pos2, $make, $touchPos;
 
-	private $pos;
+	private array $pos;
 
-	public function __construct(EconomyProperty $plugin, $command = "property", $pos1 = "pos1", $pos2 = "pos2", $make = "make", $touchPos = "touchpos") {
-		parent::__construct($command);
-		$this->setUsage("/$command <$pos1|$pos2|$make> [price]");
+	public function __construct(EconomyProperty $plugin, string $command = "property", string $pos1 = "pos1", string $pos2 = "pos2", string $make = "make", string $touchPos = "touchpos") {
+		parent::__construct($command, "Property manage command", "/$command <$pos1|$pos2|$make> [price]");
 		$this->setPermission("economyproperty.command.property;economyproperty.command.property.pos1;economyproperty.command.property.pos2;");
-		$this->setDescription("Property manage command");
 		$this->plugin = $plugin;
 		$this->command = $command;
 		$this->pos1 = $pos1;
@@ -49,25 +46,21 @@ class PropertyCommand extends Command implements PluginIdentifiableCommand {
 		$this->pos = array();
 	}
 
-	public function getPlugin(): Plugin {
-		return $this->plugin;
-	}
-
-	public function execute(CommandSender $sender, string $label, array $params): bool {
+	public function execute(CommandSender $sender, string $label, array $params): void {
 		if(!$this->plugin->isEnabled() or !$this->testPermission($sender)) {
-			return false;
+			return;
 		}
 
 		if(!$sender instanceof Player) {
 			$sender->sendMessage("Please run this command in-game.");
-			return true;
+			return;
 		}
 
 		switch (array_shift($params)) {
 			case $this->pos1:
 				if(!$sender->hasPermission("economyproperty.command.property.pos1")) {
 					$sender->sendMessage("[EconomyProperty] You don't have permission to use this command.");
-					return false;
+					return;
 				}
 				if(!$sender instanceof Player) {
 					$sender->sendMessage("Please run this command in-game.");
@@ -76,14 +69,14 @@ class PropertyCommand extends Command implements PluginIdentifiableCommand {
 				$this->pos[$sender->getName()][0] = array(
 						(int) $sender->getX(),
 						(int) $sender->getZ(),
-						$sender->getLevel()->getFolderName()
+						$sender->getWorld()->getFolderName()
 				);
 				$sender->sendMessage("[EconomyProperty] First position has been saved.");
 				break;
 			case $this->pos2:
 				if(!$sender->hasPermission("economyproperty.command.property.pos2")) {
 					$sender->sendMessage("[EconomyProperty] You don't have permission to use this command.");
-					return false;
+					return;
 				}
 				if(!$sender instanceof Player) {
 					$sender->sendMessage("Please run this command in-game.");
@@ -102,7 +95,7 @@ class PropertyCommand extends Command implements PluginIdentifiableCommand {
 			case $this->make:
 				if(!$sender->hasPermission("economyproperty.command.property.make")) {
 					$sender->sendMessage("[EconomyProperty] You don't have permission to use this command.");
-					return false;
+					return;
 				}
 				if(!$sender instanceof Player) {
 					$sender->sendMessage("Please run this command in-game.");
@@ -117,8 +110,8 @@ class PropertyCommand extends Command implements PluginIdentifiableCommand {
 					$sender->sendMessage("Please check if your positions are all set.");
 					break;
 				}
-				$level = Server::getInstance()->getLevelByName($this->pos[$sender->getName()][0][2]);
-				if(!$level instanceof Level) {
+				$world = Server::getInstance()->getWorldManager()->getWorldByName($this->pos[$sender->getName()][0][2]);
+				if(!$world instanceof World) {
 					$sender->sendMessage("The property area where you are trying to make is corrupted.");
 					break;
 				}
@@ -130,7 +123,7 @@ class PropertyCommand extends Command implements PluginIdentifiableCommand {
 						$this->pos[$sender->getName()][1][0],
 						$this->pos[$sender->getName()][1][1]
 				);
-				$result = $this->plugin->registerArea($first, $end, $level, $price, $sender->getY(), (isset($params[0]) ? $params[0] : null), $sender->getYaw());
+				$result = $this->plugin->registerArea($first, $end, $world, $price, $sender->getY(), (isset($params[0]) ? $params[0] : null), $sender->getYaw());
 				if($result) {
 					$sender->sendMessage("[EconomyProperty] Property has successfully created.");
 				}else{
@@ -150,7 +143,7 @@ class PropertyCommand extends Command implements PluginIdentifiableCommand {
 
 				if(!is_numeric($id)) {
 					$sender->sendMessage(TextFormat::RED . "Usage: " . $this->getUsage());
-					return true;
+					return;
 				}
 
 				if($this->plugin->propertyExists($id)) {
@@ -159,11 +152,10 @@ class PropertyCommand extends Command implements PluginIdentifiableCommand {
 				}else{
 					$sender->sendMessage("[EconomyProperty] There is no property with id #" . $id);
 				}
-				return true;
+				return;
 			default:
-				$sender->sendMessage("Usage: " . $this->usageMessage);
+				$sender->sendMessage("Usage: " . $this->getUsage());
 		}
-		return true;
 	}
 
 	public function mergePosition($player, $index, $data) {

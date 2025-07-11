@@ -29,6 +29,8 @@ use pocketmine\event\block\SignChangeEvent;
 use pocketmine\event\Listener;
 use pocketmine\event\player\PlayerInteractEvent;
 use pocketmine\item\Item;
+use pocketmine\item\ItemFactory;
+use pocketmine\player\Player;
 use pocketmine\plugin\PluginBase;
 use pocketmine\utils\Config;
 
@@ -83,7 +85,7 @@ class EconomyPShop extends PluginBase implements Listener {
 				return;
 			}
 
-			if(in_array(strtolower($event->getBlock()->getLevel()->getFolderName()), $this->getConfig()->get("disallow-worlds", []))) {
+			if(in_array(strtolower($event->getBlock()->getPosition()->getWorld()->getFolderName()), $this->getConfig()->get("disallow-worlds", []))) {
 				$player->sendMessage($this->getMessage("disallowed-world"));
 				return;
 			}
@@ -93,7 +95,7 @@ class EconomyPShop extends PluginBase implements Listener {
 				$player->sendMessage($this->getMessage("no-shop-tax"));
 				return;
 			}
-			EconomyAPI::getInstance()->reduceMoney($player->getName(), $this->getConfig()->get("shop-tax"));
+			EconomyAPI::getInstance()->reduceMoney($player, $this->getConfig()->get("shop-tax"));
 
 			$cost = $line[1];
 			$item = $line[2];
@@ -109,23 +111,24 @@ class EconomyPShop extends PluginBase implements Listener {
 				return;
 			}
 
-			$item = Item::fromString($line[2]);
+			$itemData = explode(":", $line[2]);
+			$item = ItemFactory::getInstance()->get((int)($itemData[0]), (int)($itemData[1] ?? 0), 1);
 			if(!$item instanceof Item) {
 				$player->sendMessage($this->getMessage("item-not-support", array($line[2], "", "")));
 				return;
 			}
 
 			$block = $event->getBlock();
-			$this->shop[$block->getX() . ":" . $block->getY() . ":" . $block->getZ() . ":" . $block->getLevel()->getFolderName()] = [
+			$this->shop[$block->getX() . ":" . $block->getY() . ":" . $block->getZ() . ":" . $block->getPosition()->getWorld()->getFolderName()] = [
 					"x" => $block->getX(),
 					"y" => $block->getY(),
 					"z" => $block->getZ(),
-					"level" => $block->getLevel()->getFolderName(),
+					"level" => $block->getPosition()->getWorld()->getFolderName(),
 					"owner" => $player->getName(),
 					"price" => (int) $line[1],
-					"item" => (int) $item->getID(),
+					"item" => $item->getId(),
 					"itemName" => $line[2],
-					"meta" => (int) $item->getDamage(),
+					"meta" => $item->getMeta(),
 					"amount" => (int) $line[3]
 			];
 
@@ -157,7 +160,7 @@ class EconomyPShop extends PluginBase implements Listener {
 
 	public function onBlockBreak(BlockBreakEvent $event) {
 		$block = $event->getBlock();
-		$loc = $block->getX() . ":" . $block->getY() . ":" . $block->getZ() . ":" . $block->getLevel()->getFolderName();
+		$loc = $block->getX() . ":" . $block->getY() . ":" . $block->getZ() . ":" . $block->getPosition()->getWorld()->getFolderName();
 		if(isset($this->shop[$loc])) {
 			$player = $event->getPlayer();
 			$shop = $this->shop[$loc];
@@ -182,7 +185,7 @@ class EconomyPShop extends PluginBase implements Listener {
 			return;
 		}
 		$block = $event->getBlock();
-		$loc = $block->getX() . ":" . $block->getY() . ":" . $block->getZ() . ":" . $block->getLevel()->getFolderName();
+		$loc = $block->getX() . ":" . $block->getY() . ":" . $block->getZ() . ":" . $block->getPosition()->getWorld()->getFolderName();
 		if(isset($this->shop[$loc])) {
 			$player = $event->getPlayer();
 			if($player->hasPermission("economypshop.shop.buy")) {
@@ -216,10 +219,10 @@ class EconomyPShop extends PluginBase implements Listener {
 							$api = EconomyAPI::getInstance();
 							if($api->myMoney($player) > $shop["price"]) {
 								$player->getInventory()->addItem($item);
-								$api->reduceMoney($player, $shop["price"]);
+								$api->reduceMoney($player, $shop["price"], null, null, true);
 								$player->sendMessage($this->getMessage("bought-item", [$shop["item"] . ":" . $shop["meta"], $shop["price"], $shop["amount"]]));
 								$cloud->removeItem($shop["item"], $shop["meta"], $shop["amount"]);
-								$api->addMoney($shop["owner"], $shop["price"]);
+								$api->addMoney($shop["owner"], $shop["price"], null, null, true);
 							}else{
 								$player->sendMessage($this->getMessage("no-money"));
 							}

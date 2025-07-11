@@ -24,28 +24,29 @@ use onebone\economyapi\currency\CurrencyReplacer;
 use onebone\economyapi\EconomyAPI;
 use onebone\economyapi\form\AskPayForm;
 use pocketmine\command\CommandSender;
-use pocketmine\command\PluginCommand;
-use pocketmine\Player;
+use pocketmine\command\Command;
+use pocketmine\player\Player;
 use pocketmine\utils\TextFormat;
 
-class PayCommand extends PluginCommand {
+class PayCommand extends Command {
+	private EconomyAPI $plugin;
+
 	public function __construct(EconomyAPI $plugin) {
+		$this->plugin = $plugin;
 		$desc = $plugin->getCommandMessage("pay");
-		parent::__construct("pay", $plugin);
-		$this->setDescription($desc["description"]);
-		$this->setUsage($desc["usage"]);
+		parent::__construct("pay", $desc["description"], $desc["usage"]);
 
 		$this->setPermission("economyapi.command.pay");
 	}
 
-	public function execute(CommandSender $sender, string $label, array $params): bool {
+	public function execute(CommandSender $sender, string $label, array $params): void {
 		if(!$this->testPermission($sender)) {
-			return false;
+			return;
 		}
 
 		if(!$sender instanceof Player) {
 			$sender->sendMessage(TextFormat::RED . "Please run this command in-game.");
-			return true;
+			return;
 		}
 
 		$player = array_shift($params);
@@ -54,11 +55,10 @@ class PayCommand extends PluginCommand {
 
 		if(!is_numeric($amount)) {
 			$sender->sendMessage(TextFormat::RED . "Usage: " . $this->getUsage());
-			return true;
+			return;
 		}
 
-		/** @var EconomyAPI $plugin */
-		$plugin = $this->getPlugin();
+		$plugin = $this->plugin;
 
 		if($currencyId === null) {
 			$currency = $plugin->getPlayerPreferredCurrency($player, false);
@@ -67,14 +67,14 @@ class PayCommand extends PluginCommand {
 			$currency = $plugin->getCurrency($currencyId);
 			if($currency === null) {
 				$sender->sendMessage($plugin->getMessage('currency-unavailable', $sender, [$currencyId]));
-				return true;
+				return;
 			}
 		}
 
 		$money = $plugin->myMoney($sender, $currency);
 		if($money < $amount) {
 			$sender->sendMessage($plugin->getMessage("pay-no-money", $sender, [new CurrencyReplacer($currency, $amount)]));
-			return true;
+			return;
 		}
 
 		if(($p = $plugin->getServer()->getPlayer($player)) instanceof Player) {
@@ -83,20 +83,19 @@ class PayCommand extends PluginCommand {
 
 		if($player === $sender->getName()) {
 			$sender->sendMessage($plugin->getMessage("pay-no-self", $sender));
-			return true;
+			return;
 		}
 
 		if(!$p instanceof Player and $plugin->getPluginConfig()->getAllowPayOffline() === false) {
 			$sender->sendMessage($plugin->getMessage("player-not-connected", $sender, [$player]));
-			return true;
+			return;
 		}
 
 		if(!$plugin->hasAccount($player, $currency)) {
 			$sender->sendMessage($plugin->getMessage("player-never-connected", $sender, [$player]));
-			return true;
+			return;
 		}
 
 		$sender->sendForm(new AskPayForm($plugin, $sender, $currency, $player, $amount, $label, $params));
-		return true;
 	}
 }

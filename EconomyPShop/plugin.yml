@@ -4,6 +4,7 @@ author: onebone
 main: onebone\economypshop\EconomyPShop
 
 api: 5.0.0
+depend: [EconomyAPI]
 
 permissions:
  economypshop:

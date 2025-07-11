@@ -8,11 +8,11 @@ use pocketmine\event\Listener;
 use pocketmine\event\player\PlayerInteractEvent;
 use pocketmine\event\player\PlayerMoveEvent;
 use pocketmine\event\server\DataPacketSendEvent;
-use pocketmine\inventory\PlayerInventory;
-use pocketmine\level\Position;
+use pocketmine\player\inventory\PlayerInventory;
+use pocketmine\world\Position;
 use pocketmine\network\mcpe\protocol\AvailableCommandsPacket;
-use pocketmine\network\mcpe\protocol\types\command\CommandEnum;
-use pocketmine\network\mcpe\protocol\types\command\CommandParameter;
+use pocketmine\network\mcpe\protocol\types\CommandEnum;
+use pocketmine\network\mcpe\protocol\types\CommandParameter;
 use pocketmine\player\Player;
 
 class EventListener implements Listener {
@@ -42,7 +42,7 @@ class EventListener implements Listener {
 		$vec = $to->floor();
 
 		$lands = $this->plugin->getLandManager();
-		$land = $lands->getLandAt($vec->getX(), $vec->getZ(), $to->getLevel()->getFolderName());
+		$land = $lands->getLandAt($vec->getX(), $vec->getZ(), $to->getWorld()->getFolderName());
 		if($land === null) return true;
 
 		$name = strtolower($player->getName());
@@ -60,11 +60,11 @@ class EventListener implements Listener {
 		if($event->getAction() === PlayerInteractEvent::LEFT_CLICK_AIR
 		or $event->getAction() === PlayerInteractEvent::RIGHT_CLICK_AIR) return;
 
-		$pos = $event->getBlock()->floor();
+		$pos = $event->getBlock()->getPosition()->floor();
 		$player = $event->getPlayer();
 
 		$lands = $this->plugin->getLandManager();
-		$land = $lands->getLandAt($pos->getX(), $pos->getZ(), $player->getLevel()->getFolderName());
+		$land = $lands->getLandAt($pos->getX(), $pos->getZ(), $player->getWorld()->getFolderName());
 		if($land === null) return;
 
 		$name = strtolower($player->getName());
@@ -91,10 +91,10 @@ class EventListener implements Listener {
 		if(!$inv instanceof PlayerInventory) return;
 
 		$player = $inv->getHolder();
-		$vec = $event->getItem()->floor();
+		$vec = $event->getItem()->getPosition()->floor();
 
 		$lands = $this->plugin->getLandManager();
-		$land = $lands->getLandAt($vec->getX(), $vec->getZ(), $player->getLevel()->getFolderName());
+		$land = $lands->getLandAt($vec->getX(), $vec->getZ(), $player->getWorld()->getFolderName());
 		if($land === null) return;
 
 		$name = strtolower($player->getName());
@@ -109,7 +109,7 @@ class EventListener implements Listener {
 		}
 	}
 
-	public function onDataPacketSend(DataPacketSendEvent $event) {
+	/*public function onDataPacketSend(DataPacketSendEvent $event) {
 		$pk = $event->getPacket();
 		if(!$pk instanceof AvailableCommandsPacket) return;
 		$player = $event->getPlayer();
@@ -224,9 +224,9 @@ class EventListener implements Listener {
 		];
 
 		$pk->commandData['land'] = $data;
-	}
+	}*/
 
-	private function buildLandIdAutoComplete(Player $player): CommandParameter {
+	/*private function buildLandIdAutoComplete(Player $player): CommandParameter {
 		return self::also(new CommandParameter(), function(CommandParameter $it) use ($player) {
 			$it->paramName = 'land ID';
 			$it->paramType = AvailableCommandsPacket::ARG_TYPE_STRING;
@@ -238,7 +238,7 @@ class EventListener implements Listener {
 				}, $this->plugin->getLandManager()->getLandsByOwner($player->getName()));
 			});
 		});
-	}
+	}*/
 
 	public static function also($object, $callback) {
 		$callback($object);

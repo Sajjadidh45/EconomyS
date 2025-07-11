@@ -26,7 +26,7 @@ use pocketmine\command\CommandSender;
 use pocketmine\event\block\BlockBreakEvent;
 use pocketmine\event\block\BlockPlaceEvent;
 use pocketmine\event\Listener;
-use pocketmine\Player;
+use pocketmine\player\Player;
 use pocketmine\plugin\PluginBase;
 use pocketmine\utils\Config;
 use pocketmine\utils\TextFormat;
@@ -34,12 +34,9 @@ use pocketmine\utils\TextFormat;
 class EconomyJob extends PluginBase implements Listener {
 	/** @var EconomyJob */
 	private static $instance;
-	/** @var Config */
-	private $jobs;
-	/** @var Config */
-	private $player;
-	/** @var  EconomyAPI */
-	private $api;
+	private Config $jobs;
+	private Config $player;
+	private EconomyAPI $api;
 
 	/**
 	 * @return EconomyJob
@@ -60,17 +57,6 @@ class EconomyJob extends PluginBase implements Listener {
 		self::$instance = $this;
 	}
 
-	private function readResource($res) {
-		$resource = $this->getResource($res);
-		if(!is_resource($resource)) {
-			$this->getLogger()->debug("Tried to load unknown resource " . TextFormat::AQUA . $res . TextFormat::RESET);
-			return false;
-		}
-		$content = stream_get_contents($resource);
-		@fclose($resource);
-		return $content;
-	}
-
 	public function onDisable() {
 		$this->player->save();
 	}
@@ -86,12 +72,12 @@ class EconomyJob extends PluginBase implements Listener {
 
 		$job = $this->jobs->get($this->player->get($player->getName()));
 		if($job !== false) {
-			if(isset($job[$block->getID() . ":" . $block->getDamage() . ":break"])) {
-				$money = $job[$block->getID() . ":" . $block->getDamage() . ":break"];
+			if(isset($job[$block->getId() . ":" . $block->getMeta() . ":break"])) {
+				$money = $job[$block->getId() . ":" . $block->getMeta() . ":break"];
 				if($money > 0) {
-					$this->api->addMoney($player, $money);
+					$this->api->addMoney($player, $money, null, null, true);
 				}else{
-					$this->api->reduceMoney($player, $money);
+					$this->api->reduceMoney($player, abs($money), null, null, true);
 				}
 			}
 		}
@@ -108,12 +94,12 @@ class EconomyJob extends PluginBase implements Listener {
 
 		$job = $this->jobs->get($this->player->get($player->getName()));
 		if($job !== false) {
-			if(isset($job[$block->getID() . ":" . $block->getDamage() . ":place"])) {
-				$money = $job[$block->getID() . ":" . $block->getDamage() . ":place"];
+			if(isset($job[$block->getId() . ":" . $block->getMeta() . ":place"])) {
+				$money = $job[$block->getId() . ":" . $block->getMeta() . ":place"];
 				if($money > 0) {
-					$this->api->addMoney($player, $money);
+					$this->api->addMoney($player, $money, null, null, true);
 				}else{
-					$this->api->reduceMoney($player, $money);
+					$this->api->reduceMoney($player, abs($money), null, null, true);
 				}
 			}
 		}

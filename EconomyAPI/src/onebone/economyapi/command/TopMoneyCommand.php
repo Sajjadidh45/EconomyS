@@ -23,25 +23,26 @@ namespace onebone\economyapi\command;
 use onebone\economyapi\EconomyAPI;
 use onebone\economyapi\currency\CurrencyReplacer;
 use pocketmine\command\CommandSender;
-use pocketmine\command\PluginCommand;
+use pocketmine\command\Command;
+use pocketmine\player\Player;
 
-class TopMoneyCommand extends PluginCommand {
+class TopMoneyCommand extends Command {
+	private EconomyAPI $plugin;
+
 	public function __construct(EconomyAPI $plugin) {
+		$this->plugin = $plugin;
 		$desc = $plugin->getCommandMessage("topmoney");
-		parent::__construct("topmoney", $plugin);
-		$this->setDescription($desc["description"]);
-		$this->setUsage($desc["usage"]);
+		parent::__construct("topmoney", $desc["description"], $desc["usage"]);
 
 		$this->setPermission("economyapi.command.topmoney");
 	}
 
-	public function execute(CommandSender $sender, string $label, array $params): bool {
-		if(!$this->testPermission($sender)) return false;
+	public function execute(CommandSender $sender, string $label, array $params): void {
+		if(!$this->testPermission($sender)) return;
 
 		$page = max(1, (int) array_shift($params));
 
-		/** @var EconomyAPI $plugin */
-		$plugin = $this->getPlugin();
+		$plugin = $this->plugin;
 
 		$currency = $plugin->getPlayerPreferredCurrency($sender, false);
 
@@ -58,6 +59,5 @@ class TopMoneyCommand extends PluginCommand {
 		})->catch(function() use ($sender) {
 			$sender->sendMessage('Failed to fetch money leaderboard :(');
 		});
-		return true;
 	}
 }

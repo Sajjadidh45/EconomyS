@@ -23,34 +23,34 @@ namespace onebone\economyapi\command;
 use onebone\economyapi\EconomyAPI;
 use onebone\economyapi\currency\CurrencyReplacer;
 use pocketmine\command\CommandSender;
-use pocketmine\command\PluginCommand;
-use pocketmine\Player;
+use pocketmine\command\Command;
+use pocketmine\player\Player;
 use pocketmine\utils\TextFormat;
 
-class SeeMoneyCommand extends PluginCommand {
+class SeeMoneyCommand extends Command {
+	private EconomyAPI $plugin;
+
 	public function __construct(EconomyAPI $plugin) {
+		$this->plugin = $plugin;
 		$desc = $plugin->getCommandMessage("seemoney");
-		parent::__construct("seemoney", $plugin);
-		$this->setDescription($desc["description"]);
-		$this->setUsage($desc["usage"]);
+		parent::__construct("seemoney", $desc["description"], $desc["usage"]);
 
 		$this->setPermission("economyapi.command.seemoney");
 	}
 
-	public function execute(CommandSender $sender, string $label, array $params): bool {
+	public function execute(CommandSender $sender, string $label, array $params): void {
 		if(!$this->testPermission($sender)) {
-			return false;
+			return;
 		}
 
 		$player = array_shift($params);
 		$currencyId = array_shift($params);
 		if(trim($player) === "") {
 			$sender->sendMessage(TextFormat::RED . "Usage: " . $this->getUsage());
-			return true;
+			return;
 		}
 
-		/** @var EconomyAPI $plugin */
-		$plugin = $this->getPlugin();
+		$plugin = $this->plugin;
 		if(($p = $plugin->getServer()->getPlayer($player)) instanceof Player) {
 			$player = $p->getName();
 		}
@@ -62,7 +62,7 @@ class SeeMoneyCommand extends PluginCommand {
 			$currency = $plugin->getCurrency($currencyId);
 			if($currency === null) {
 				$sender->sendMessage($plugin->getMessage('currency-unavailable', $sender, [$currencyId]));
-				return true;
+				return;
 			}
 		}
 
@@ -72,6 +72,5 @@ class SeeMoneyCommand extends PluginCommand {
 		}else{
 			$sender->sendMessage($plugin->getMessage("player-never-connected", $sender, [$player]));
 		}
-		return true;
 	}
 }

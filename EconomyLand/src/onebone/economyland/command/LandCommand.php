@@ -23,12 +23,10 @@ namespace onebone\economyland\command;
 use onebone\economyland\EconomyLand;
 use pocketmine\command\Command;
 use pocketmine\command\CommandSender;
-use pocketmine\command\PluginIdentifiableCommand;
 use pocketmine\math\Vector3;
-use pocketmine\Player;
-use pocketmine\plugin\Plugin;
+use pocketmine\player\Player;
 
-class LandCommand extends Command implements PluginIdentifiableCommand {
+class LandCommand extends Command {
 	/** @var EconomyLand */
 	private $plugin;
 	/** @var Subcommand[] */
@@ -60,18 +58,14 @@ class LandCommand extends Command implements PluginIdentifiableCommand {
 		$this->initSubcommands();
 	}
 
-	public function getPlugin(): Plugin {
-		return $this->plugin;
-	}
-
-	public function execute(CommandSender $sender, string $commandLabel, array $args): bool {
+	public function execute(CommandSender $sender, string $commandLabel, array $args): void {
 		$subcommand = array_shift($args);
 		if(isset($this->subcommands[$subcommand])) {
 			$this->subcommands[$subcommand]->process($sender, $args);
-			return true;
+			return;
 		}else{
 			$sender->sendMessage($this->getUsage());
-			return false;
+			return;
 		}
 	}
 

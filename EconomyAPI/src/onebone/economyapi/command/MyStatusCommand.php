@@ -21,33 +21,33 @@
 namespace onebone\economyapi\command;
 
 use onebone\economyapi\EconomyAPI;
+use pocketmine\command\Command;
 use pocketmine\command\CommandSender;
-use pocketmine\command\PluginCommand;
-use pocketmine\Player;
+use pocketmine\player\Player;
 use pocketmine\utils\TextFormat;
 
-class MyStatusCommand extends PluginCommand {
+class MyStatusCommand extends Command {
+	private EconomyAPI $plugin;
+
 	public function __construct(EconomyAPI $plugin) {
+		$this->plugin = $plugin;
 		$desc = $plugin->getCommandMessage("mystatus");
-		parent::__construct("mystatus", $plugin);
-		$this->setDescription($desc["description"]);
-		$this->setUsage($desc["usage"]);
+		parent::__construct("mystatus", $desc["description"], $desc["usage"]);
 
 		$this->setPermission("economyapi.command.mystatus");
 	}
 
-	public function execute(CommandSender $sender, string $label, array $params): bool {
+	public function execute(CommandSender $sender, string $label, array $params): void {
 		if(!$this->testPermission($sender)) {
-			return false;
+			return;
 		}
 
 		if(!$sender instanceof Player) {
 			$sender->sendMessage(TextFormat::RED . "Please run this command in-game.");
-			return true;
+			return;
 		}
 
-		/** @var EconomyAPI $plugin */
-		$plugin = $this->getPlugin();
+		$plugin = $this->plugin;
 
 		$money = $plugin->getAllMoney();
 
@@ -61,7 +61,6 @@ class MyStatusCommand extends PluginCommand {
 		}
 
 		$sender->sendMessage($plugin->getMessage("mystatus-show", $sender, [$topMoney]));
-		return true;
 	}
 }
 

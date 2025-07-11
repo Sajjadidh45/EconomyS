@@ -27,13 +27,13 @@ use onebone\economyland\land\LandMeta;
 use onebone\economyland\land\LandOption;
 use pocketmine\block\Air;
 use pocketmine\block\Block;
+use pocketmine\block\tile\Sign;
+use pocketmine\block\tile\Tile;
 use pocketmine\event\block\BlockBreakEvent;
 use pocketmine\event\block\BlockPlaceEvent;
 use pocketmine\event\Listener;
 use pocketmine\event\player\PlayerInteractEvent;
 use pocketmine\item\Item;
-use pocketmine\level\Level;
-use pocketmine\level\Position;
 use pocketmine\math\Vector2;
 use pocketmine\math\Vector3;
 use pocketmine\nbt\tag\CompoundTag;
@@ -41,8 +41,8 @@ use pocketmine\nbt\tag\IntTag;
 use pocketmine\nbt\tag\StringTag;
 use pocketmine\player\Player;
 use pocketmine\plugin\PluginBase;
-use pocketmine\tile\Sign;
-use pocketmine\tile\Tile;
+use pocketmine\world\Position;
+use pocketmine\world\World;
 use SQLite3;
 
 class EconomyProperty extends PluginBase implements Listener {
@@ -113,8 +113,8 @@ class EconomyProperty extends PluginBase implements Listener {
 		$player = $event->getPlayer();
 
 		if(isset($this->touch[$player->getName()])) {
-			//	$mergeData[$player->getName()][0] = [(int)$block->getX(), (int)$block->getZ(), $block->getLevel()->getName()];
-			$this->command->mergePosition($player->getName(), 0, [(int) $block->getX(), (int) $block->getZ(), $block->getLevel()->getFolderName()]);
+			//	$mergeData[$player->getName()][0] = [(int)$block->getX(), (int)$block->getZ(), $block->getPosition()->getWorld()->getFolderName()];
+			$this->command->mergePosition($player->getName(), 0, [(int) $block->getX(), (int) $block->getZ(), $block->getPosition()->getWorld()->getFolderName()]);
 			$player->sendMessage("[EconomyProperty] First position has been saved.");
 			$event->setCancelled(true);
 			if($event->getItem()->canBePlaced()) {
@@ -123,9 +123,9 @@ class EconomyProperty extends PluginBase implements Listener {
 			return;
 		}
 
-		$info = $this->property->query("SELECT * FROM Property WHERE startX <= {$block->getX()} AND landX >= {$block->getX()} AND startZ <= {$block->getZ()} AND landZ >= {$block->getZ()} AND level = '{$block->getLevel()->getName()}'")->fetchArray(SQLITE3_ASSOC);
+		$info = $this->property->query("SELECT * FROM Property WHERE startX <= {$block->getX()} AND landX >= {$block->getX()} AND startZ <= {$block->getZ()} AND landZ >= {$block->getZ()} AND level = '{$block->getPosition()->getWorld()->getFolderName()}'")->fetchArray(SQLITE3_ASSOC);
 		if(!is_bool($info)) {
-			if(!($info["x"] === $block->getX() and $info["y"] === $block->getY() and $info["z"] === $block->getZ())) {
+			if(!($info["x"] === $block->getPosition()->getX() and $info["y"] === $block->getPosition()->getY() and $info["z"] === $block->getPosition()->getZ())) {
 				if($player->hasPermission("economyproperty.property.modify") === false) {
 					$event->setCancelled(true);
 					if($event->getItem()->canBePlaced()) {
@@ -137,14 +137,14 @@ class EconomyProperty extends PluginBase implements Listener {
 					return;
 				}
 			}
-			$level = $block->getLevel();
-			$tile = $level->getTile($block);
+			$world = $block->getPosition()->getWorld();
+			$tile = $world->getTile($block->getPosition());
 			if(!$tile instanceof Sign) {
 				$this->property->exec("DELETE FROM Property WHERE landNum = $info[landNum]");
 				return;
 			}
 			$now = time();
-			if(isset($this->tap[$player->getName()]) and $this->tap[$player->getName()][0] === $block->x . ":" . $block->y . ":" . $block->z and ($now - $this->tap[$player->getName()][1]) <= 2) {
+			if(isset($this->tap[$player->getName()]) and $this->tap[$player->getName()][0] === $block->getPosition()->x . ":" . $block->getPosition()->y . ":" . $block->getPosition()->z and ($now - $this->tap[$player->getName()][1]) <= 2) {
 				if(EconomyAPI::getInstance()->myMoney($player) < $info["price"]) {
 					$player->sendMessage("You don't have enough money to buy here.");
 					return;
@@ -153,22 +153,21 @@ class EconomyProperty extends PluginBase implements Listener {
 					$economyLand = $this->getServer()->getPluginManager()->getPlugin("EconomyLand");
 					$start = new Vector2((float)$info["startX"], (float)$info["startZ"]);
 					$end = new Vector2((float)$info["landX"], (float)$info["landZ"]);
-					if (!empty($economyLand->getLandManager()->getLandsOn($start, $end, $level))) {
+					if (!empty($economyLand->getLandManager()->getLandsOn($start, $end, $world))) {
 						$player->sendMessage("[EconomyProperty] Failed to buy the land because the land is trying to overlap.");
 						return;
 					}
 
-					$land = $economyLand->getLandManager()->createLand($start, $end, $level, $player, new LandOption([], false, true, false), new LandMeta(microtime(true)));
+					$land = $economyLand->getLandManager()->createLand($start, $end, $world, $player, new LandOption([], false, true, false), new LandMeta(microtime(true)));
 					$economyLand->getLandManager()->addLand($land);
 					EconomyAPI::getInstance()->reduceMoney($player, $info["price"]);
 					$player->sendMessage("Successfully bought land.");
 					$this->property->exec("DELETE FROM Property WHERE landNum = $info[landNum]");
 				}
-				$tile->close();
-				$level->setBlock($block, new Air());
+				$world->setBlock($block->getPosition(), new Air());
 				unset($this->tap[$player->getName()]);
 			}else{
-				$this->tap[$player->getName()] = array($block->x . ":" . $block->y . ":" . $block->z, $now);
+				$this->tap[$player->getName()] = array($block->getPosition()->x . ":" . $block->getPosition()->y . ":" . $block->getPosition()->z, $now);
 				$player->sendMessage("#" . $info["landNum"] . " [EconomyProperty] Are you sure to buy here? Tap again to confirm.");
 				$event->setCancelled(true);
 				if($event->getItem()->canBePlaced()) {
@@ -199,9 +198,9 @@ class EconomyProperty extends PluginBase implements Listener {
 			return;
 		}
 
-		$info = $this->property->query("SELECT * FROM Property WHERE startX <= {$block->getX()} AND landX >= {$block->getX()} AND startZ <= {$block->getZ()} AND landZ >= {$block->getZ()} AND level = '{$block->getLevel()->getName()}'")->fetchArray(SQLITE3_ASSOC);
+		$info = $this->property->query("SELECT * FROM Property WHERE startX <= {$block->getPosition()->getX()} AND landX >= {$block->getPosition()->getX()} AND startZ <= {$block->getPosition()->getZ()} AND landZ >= {$block->getPosition()->getZ()} AND level = '{$block->getPosition()->getWorld()->getFolderName()}'")->fetchArray(SQLITE3_ASSOC);
 		if(is_bool($info) === false) {
-			if($info["x"] === $block->getX() and $info["y"] === $block->getY() and $info["z"] === $block->getZ()) {
+			if($info["x"] === $block->getPosition()->getX() and $info["y"] === $block->getPosition()->getY() and $info["z"] === $block->getPosition()->getZ()) {
 				if($player->hasPermission("economyproperty.property.remove")) {
 					$this->property->exec("DELETE FROM Property WHERE landNum = $info[landNum]");
 					$player->sendMessage("[EconomyProperty] You have removed property area #" . $info["landNum"]);
@@ -218,10 +217,10 @@ class EconomyProperty extends PluginBase implements Listener {
 		}
 	}
 
-	public function registerArea($first, $sec, $level, $price, $expectedY = 64, $rentTime = null, $expectedYaw = 0) {
-		if(!$level instanceof Level) {
-			$level = $this->getServer()->getLevelByName($level);
-			if(!$level instanceof Level) {
+	public function registerArea($first, $sec, World $world, $price, $expectedY = 64, $rentTime = null, $expectedYaw = 0) {
+		if(!$world instanceof World) {
+			$world = $this->getServer()->getWorldManager()->getWorldByName($world);
+			if(!$world instanceof World) {
 				return false;
 			}
 		}
@@ -237,12 +236,12 @@ class EconomyProperty extends PluginBase implements Listener {
 			$sec[1] = $tmp;
 		}
 
-		if($this->checkOverlapping($first, $sec, $level)) {
+		if($this->checkOverlapping($first, $sec, $world)) {
 			return false;
 		}
 		/** @var EconomyLand $economyLand */
 		$economyLand = $this->getServer()->getPluginManager()->getPlugin("EconomyLand");
-		if(!empty($economyLand->getLandManager()->getLandsOn(new Vector2((float)$first[0], (float)$first[1]), new Vector2((float)$sec[0], (float)$sec[1]), $level))) {
+		if(!empty($economyLand->getLandManager()->getLandsOn(new Vector2((float)$first[0], (float)$first[1]), new Vector2((float)$sec[0], (float)$sec[1]), $world))) {
 			return false;
 		}
 
@@ -257,7 +256,7 @@ class EconomyProperty extends PluginBase implements Listener {
 		$tmpY = 0;
 		$lastBlock = 0;
 		for (; $y < 127; $y++) {
-			$b = $level->getBlock(new Vector3($centerx, $y, $centerz));
+			$b = $world->getBlock(new Vector3($centerx, $y, $centerz));
 			$difference = abs($expectedY - $y);
 			if($difference > $diff) { // Finding the closest location with player or something
 				$y = $tmpY;
@@ -274,29 +273,22 @@ class EconomyProperty extends PluginBase implements Listener {
 			$y = $expectedY;
 		}
 		$meta = floor((($expectedYaw + 180) * 16 / 360) + 0.5) & 0x0F;
-		$level->setBlock(new Position($centerx, $y, $centerz, $level), Block::get(Item::SIGN_POST, $meta));
+		$pos = new Vector3($centerx, $y, $centerz);
+		$world->setBlock($pos, Block::get(Item::SIGN_POST, $meta));
 
 		$info = $this->property->query("SELECT seq FROM sqlite_sequence")->fetchArray(SQLITE3_ASSOC);
-		$tile = new Sign($level->getChunk($centerx >> 4, $centerz >> 4, false), new CompoundTag(false, [
-				"id" => new StringTag("id", Tile::SIGN),
-				"x" => new IntTag("x", $centerx),
-				"y" => new IntTag("y", $y),
-				"z" => new IntTag("z", $centerz),
-				"Text1" => new StringTag("Text1", ""),
-				"Text2" => new StringTag("Text2", ""),
-				"Text3" => new StringTag("Text3", ""),
-				"Text4" => new StringTag("Text4", "")
-		]));
-		$tile->setText($rentTime === null ? "[PROPERTY]" : "[RENT]", "Price : $price", "Blocks : " . ($x * $z * 128), ($rentTime === null ? "Property #" . $info["seq"] : "Time : " . ($rentTime) . "min"));
-		$this->property->exec("INSERT INTO Property (price, x, y, z, level, startX, startZ, landX, landZ" . ($rentTime === null ? "" : ", rentTime") . ") VALUES ($price, $centerx, $y, $centerz, '{$level->getName()}', $first[0], $first[1], $sec[0], $sec[1]" . ($rentTime === null ? "" : ", $rentTime") . ")");
+		$tile = $world->getTile($pos);
+		if($tile instanceof Sign){
+			$tile->setText($rentTime === null ? "[PROPERTY]" : "[RENT]", "Price : $price", "Blocks : " . ($x * $z * 128), ($rentTime === null ? "Property #" . $info["seq"] : "Time : " . ($rentTime) . "min"));
+		}
+
+		$this->property->exec("INSERT INTO Property (price, x, y, z, level, startX, startZ, landX, landZ" . ($rentTime === null ? "" : ", rentTime") . ") VALUES ($price, $centerx, $y, $centerz, '{$world->getFolderName()}', $first[0], $first[1], $sec[0], $sec[1]" . ($rentTime === null ? "" : ", $rentTime") . ")");
 		return [$centerx, $y, $centerz];
 	}
 
-	public function checkOverlapping($first, $sec, $level) {
-		if($level instanceof Level) {
-			$level = $level->getName();
-		}
-		$d = $this->property->query("SELECT * FROM Property WHERE (((startX <= $first[0] AND landX >= $first[0]) AND (startZ <= $first[1] AND landZ >= $first[1])) OR ((startX <= $sec[0] AND landX >= $sec[0]) AND (startZ <= $first[1] AND landZ >= $sec[1]))) AND level = '$level'")->fetchArray(SQLITE3_ASSOC);
+	public function checkOverlapping($first, $sec, World $world) {
+		$levelName = $world->getFolderName();
+		$d = $this->property->query("SELECT * FROM Property WHERE (((startX <= $first[0] AND landX >= $first[0]) AND (startZ <= $first[1] AND landZ >= $first[1])) OR ((startX <= $sec[0] AND landX >= $sec[0]) AND (startZ <= $first[1] AND landZ >= $sec[1]))) AND level = '$levelName'")->fetchArray(SQLITE3_ASSOC);
 		return !is_bool($d);
 	}
 

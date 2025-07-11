@@ -23,27 +23,27 @@ namespace onebone\economyapi\command;
 use onebone\economyapi\EconomyAPI;
 use onebone\economyapi\form\CurrencySelectionForm;
 use pocketmine\command\CommandSender;
-use pocketmine\command\PluginCommand;
-use pocketmine\Player;
+use pocketmine\command\Command;
+use pocketmine\player\Player;
 use pocketmine\utils\TextFormat;
 
-class EconomyCommand extends PluginCommand {
+class EconomyCommand extends Command {
+	private EconomyAPI $plugin;
+
 	public function __construct(EconomyAPI $plugin) {
+		$this->plugin = $plugin;
 		$desc = $plugin->getCommandMessage("economy");
-		parent::__construct("economy", $plugin);
-		$this->setDescription($desc["description"]);
-		$this->setUsage($desc["usage"]);
+		parent::__construct("economy", $desc["description"], $desc["usage"]);
 
 		$this->setPermission("economyapi.command.economy");
 	}
 
-	public function execute(CommandSender $sender, string $commandLabel, array $args): bool {
+	public function execute(CommandSender $sender, string $commandLabel, array $args): void {
 		if(!$this->testPermission($sender)) {
-			return false;
+			return;
 		}
 
-		/** @var EconomyAPI $plugin */
-		$plugin = $this->getPlugin();
+		$plugin = $this->plugin;
 
 		$mode = strtolower(array_shift($args));
 		$val = array_shift($args);
@@ -53,7 +53,7 @@ class EconomyCommand extends PluginCommand {
 			case 'language':
 				if(trim($val) === "") {
 					$sender->sendMessage(TextFormat::RED . "Usage: " . $this->getUsage());
-					return true;
+					return;
 				}
 
 				if($plugin->setPlayerLanguage($sender->getName(), $val)) {
@@ -61,25 +61,22 @@ class EconomyCommand extends PluginCommand {
 				}else{
 					$sender->sendMessage(TextFormat::RED . "There is no language such as $val");
 				}
-				return true;
+				return;
 			case 'currency':
-				/** @var EconomyAPI $plugin */
-				$plugin = $this->getPlugin();
-
 				if(trim($val) === '') {
 					if(!$sender instanceof Player) {
 						$sender->sendMessage($plugin->getMessage('economy-currency-specify', $sender));
-						return true;
+						return;
 					}
 
 					$sender->sendForm(new CurrencySelectionForm($plugin, $plugin->getCurrencies(), $sender));
-					return true;
+					return;
 				}
 
 				$currency = $plugin->getCurrency($val);
 				if($currency === null) {
 					$sender->sendMessage($plugin->getMessage('currency-unavailable', $sender, [$val]));
-					return true;
+					return;
 				}
 
 				if($plugin->setPlayerPreferredCurrency($sender, $currency)) {
@@ -89,12 +86,9 @@ class EconomyCommand extends PluginCommand {
 				}else{
 					$sender->sendMessage($plugin->getMessage('economy-currency-failed', $sender, [$currency->getName()]));
 				}
-				return true;
+				return;
 			default:
 				$sender->sendMessage($this->getUsage());
 		}
-
-		$sender->sendMessage(TextFormat::RED . "Usage: " . $this->getUsage());
-		return false;
 	}
 }

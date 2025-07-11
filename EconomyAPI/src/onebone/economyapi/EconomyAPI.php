@@ -63,12 +63,11 @@ use pocketmine\event\player\PlayerJoinEvent;
 use pocketmine\player\Player;
 use pocketmine\plugin\PluginBase;
 use pocketmine\utils\Config;
-use pocketmine\utils\Internet;
 use pocketmine\utils\TextFormat;
 use Throwable;
 
 class EconomyAPI extends PluginBase implements Listener {
-	const API_VERSION = 5;
+	const API_VERSION = 4;
 	const PACKAGE_VERSION = "6.0";
 
 	/**
@@ -721,7 +720,7 @@ class EconomyAPI extends PluginBase implements Listener {
 		$this->initialize();
 
 		if($this->pluginConfig->getAutoSaveInterval() > 0) {
-			$this->getScheduler()->scheduleDelayedRepeatingTask(new SaveTask($this), $this->pluginConfig->getAutoSaveInterval() * 1200, $this->pluginConfig->getAutoSaveInterval() * 1200);
+			$this->getScheduler()->scheduleRepeatingTask(new SaveTask($this), $this->pluginConfig->getAutoSaveInterval() * 1200);
 		}
 
 		if($this->currencySelector === null) {
@@ -738,9 +737,9 @@ class EconomyAPI extends PluginBase implements Listener {
 	private function initialize() {
 		$this->pluginConfig = new PluginConfig($this->getConfig());
 
-		if($this->pluginConfig->getCheckUpdate()) {
-			$this->checkUpdate();
-		}
+		//if($this->pluginConfig->getCheckUpdate()) {
+		//	$this->checkUpdate();
+		//}
 
 		switch ($this->pluginConfig->getProvider()) {
 			case 'yaml':
@@ -773,7 +772,7 @@ class EconomyAPI extends PluginBase implements Listener {
 		$this->provider->init();
 	}
 
-	private function checkUpdate(): bool {
+	/*private function checkUpdate(): bool {
 		try{
 			$info = json_decode(Internet::getURL($this->pluginConfig->getUpdateHost() . "?version=" . $this->getDescription()->getVersion() . "&package_version=" . self::PACKAGE_VERSION), true);
 			if(!isset($info["status"]) or $info["status"] !== true) {
@@ -789,7 +788,7 @@ class EconomyAPI extends PluginBase implements Listener {
 			$this->getLogger()->logException($e);
 			return false;
 		}
-	}
+	}*/
 
 	/**
 	 * Register Currency to EconomyAPI.
@@ -913,7 +912,7 @@ class EconomyAPI extends PluginBase implements Listener {
 		]);
 	}
 
-	public function onPlayerJoin(PlayerJoinEvent $event) {
+	public function onJoin(PlayerJoinEvent $event) {
 		$player = $event->getPlayer();
 
 		if(!$this->defaultCurrency->getBalanceRepository()->hasAccount($player)) {

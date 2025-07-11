@@ -23,23 +23,24 @@ namespace onebone\economyapi\command;
 use onebone\economyapi\EconomyAPI;
 use onebone\economyapi\currency\CurrencyReplacer;
 use pocketmine\command\CommandSender;
-use pocketmine\command\PluginCommand;
-use pocketmine\Player;
+use pocketmine\command\Command;
+use pocketmine\player\Player;
 use pocketmine\utils\TextFormat;
 
-class SetMoneyCommand extends PluginCommand {
+class SetMoneyCommand extends Command {
+	private EconomyAPI $plugin;
+
 	public function __construct(EconomyAPI $plugin) {
+		$this->plugin = $plugin;
 		$desc = $plugin->getCommandMessage("setmoney");
-		parent::__construct("setmoney", $plugin);
-		$this->setDescription($desc["description"]);
-		$this->setUsage($desc["usage"]);
+		parent::__construct("setmoney", $desc["description"], $desc["usage"]);
 
 		$this->setPermission("economyapi.command.setmoney");
 	}
 
-	public function execute(CommandSender $sender, string $label, array $params): bool {
+	public function execute(CommandSender $sender, string $label, array $params): void {
 		if(!$this->testPermission($sender)) {
-			return false;
+			return;
 		}
 
 		$player = array_shift($params);
@@ -48,11 +49,10 @@ class SetMoneyCommand extends PluginCommand {
 
 		if(!is_numeric($amount)) {
 			$sender->sendMessage(TextFormat::RED . "Usage: " . $this->getUsage());
-			return true;
+			return;
 		}
 
-		/** @var EconomyAPI $plugin */
-		$plugin = $this->getPlugin();
+		$plugin = $this->plugin;
 		if(($p = $plugin->getServer()->getPlayer($player)) instanceof Player) {
 			$player = $p->getName();
 		}
@@ -64,7 +64,7 @@ class SetMoneyCommand extends PluginCommand {
 			$currency = $plugin->getCurrency($currencyId);
 			if($currency === null) {
 				$sender->sendMessage($plugin->getMessage('currency-unavailable', $sender, [$currencyId]));
-				return true;
+				return;
 			}
 		}
 
@@ -76,7 +76,7 @@ class SetMoneyCommand extends PluginCommand {
 				]));
 			}else{
 				$sender->sendMessage($plugin->getMessage("player-never-connected", $sender, [$player]));
-				return true;
+				return;
 			}
 		}
 
@@ -107,6 +107,5 @@ class SetMoneyCommand extends PluginCommand {
 			default:
 				$sender->sendMessage("WTF");
 		}
-		return true;
 	}
 }

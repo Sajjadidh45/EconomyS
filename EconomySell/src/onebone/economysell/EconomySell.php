@@ -35,9 +35,10 @@ use pocketmine\event\Listener;
 use pocketmine\event\player\PlayerInteractEvent;
 use pocketmine\event\player\PlayerJoinEvent;
 use pocketmine\item\Item;
-use pocketmine\level\Position;
+use pocketmine\world\Position;
 use pocketmine\math\Vector3;
-use pocketmine\Player;
+use pocketmine\player\Player;
+use pocketmine\item\ItemFactory;
 use pocketmine\plugin\PluginBase;
 use pocketmine\utils\TextFormat;
 
@@ -76,14 +77,14 @@ class EconomySell extends PluginBase implements Listener {
 		foreach($this->provider->getAll() as $sell) {
 			if($sell[9] !== -2) {
 				if(!isset($levels[$sell[3]])) {
-					$levels[$sell[3]] = $this->getServer()->getLevelByName($sell[3]);
+					$levels[$sell[3]] = $this->getServer()->getWorldManager()->getWorldByName($sell[3]);
 				}
 				$pos = new Position($sell[0], $sell[1], $sell[2], $levels[$sell[3]]);
 				$display = $pos;
 				if($sell[9] !== -1) {
 					$display = $pos->getSide($sell[9]);
 				}
-				$this->items[$sell[3]][] = new ItemDisplayer($display, Item::get($sell[4], $sell[5]), $pos);
+				$this->items[$sell[3]][] = new ItemDisplayer($display, ItemFactory::getInstance()->get($sell[4], $sell[5]), $pos);
 			}
 		}
 
@@ -266,7 +267,7 @@ class EconomySell extends PluginBase implements Listener {
 
 	public function onPlayerJoin(PlayerJoinEvent $event) {
 		$player = $event->getPlayer();
-		$level = $player->getLevel()->getFolderName();
+		$level = $player->getWorld()->getFolderName();
 
 		if(isset($this->items[$level])) {
 			foreach($this->items[$level] as $displayer) {
@@ -278,7 +279,7 @@ class EconomySell extends PluginBase implements Listener {
 	public function onPlayerTeleport(EntityTeleportEvent $event) {
 		$player = $event->getEntity();
 		if($player instanceof Player) {
-			if(($from = $event->getFrom()->getLevel()) !== ($to = $event->getTo()->getLevel())) {
+			if(($from = $event->getFrom()->getWorld()) !== ($to = $event->getTo()->getWorld())) {
 				if($from !== null and isset($this->items[$from->getFolderName()])) {
 					foreach($this->items[$from->getFolderName()] as $displayer) {
 						$displayer->despawnFrom($player);
@@ -305,11 +306,11 @@ class EconomySell extends PluginBase implements Listener {
 
 		if(isset($this->queue[$iusername])) {
 			$queue = $this->queue[$iusername];
-			$item = Item::fromString($queue[0]);
-			$item->setCount($queue[1]);
+			$itemData = explode(":", $queue[0]);
+			$item = ItemFactory::getInstance()->get((int)$itemData[0], (int)($itemData[1] ?? 0), $queue[1]);
 
 			$ev = new SellCreationEvent($block, $item, $queue[2], $queue[3]);
-			$ev->call();
+			$this->getServer()->getPluginManager()->callEvent($ev);
 
 			if($ev->isCancelled()) {
 				$player->sendMessage($this->getMessage("sell-create-failed"));
@@ -317,8 +318,8 @@ class EconomySell extends PluginBase implements Listener {
 				return;
 			}
 			$result = $this->provider->addSell($block, [
-					$block->getX(), $block->getY(), $block->getZ(), $block->getLevel()->getFolderName(),
-					$item->getID(), $item->getDamage(), $item->getName(), $queue[1], $queue[2], $queue[3]
+					$block->getPosition()->getX(), $block->getPosition()->getY(), $block->getPosition()->getZ(), $block->getPosition()->getWorld()->getFolderName(),
+					$item->getId(), $item->getMeta(), $item->getName(), $queue[1], $queue[2], $queue[3]
 			]);
 
 			if($result) {
@@ -328,8 +329,8 @@ class EconomySell extends PluginBase implements Listener {
 						$pos = $block->getSide($queue[3]);
 					}
 
-					$this->items[$pos->getLevel()->getFolderName()][] = ($dis = new ItemDisplayer($pos, $item, $block));
-					$dis->spawnToAll($pos->getLevel());
+					$this->items[$pos->getWorld()->getFolderName()][] = ($dis = new ItemDisplayer($pos, $item, $block));
+					$dis->spawnToAll($pos->getWorld());
 				}
 
 				$player->sendMessage($this->getMessage("sell-created"));
@@ -348,7 +349,7 @@ class EconomySell extends PluginBase implements Listener {
 			foreach($this->items as $level => $arr) {
 				foreach($arr as $key => $displayer) {
 					$link = $displayer->getLinked();
-					if($link->getX() === $sell[0] and $link->getY() === $sell[1] and $link->getZ() === $sell[2] and $link->getLevel()->getFolderName() === $sell[3]) {
+					if($link->getX() === $sell[0] and $link->getY() === $sell[1] and $link->getZ() === $sell[2] and $link->getWorld()->getFolderName() === $sell[3]) {
 						$displayer->despawnFromAll();
 						unset($this->items[$key]);
 						break 2;
@@ -395,17 +396,17 @@ class EconomySell extends PluginBase implements Listener {
 			$player->sendMessage($this->getMessage("no-permission-sell"));
 			return false;
 		}
-		$item = Item::get($sell[4], $sell[5], $sell[7]);
+		$item = ItemFactory::getInstance()->get($sell[4], $sell[5], $sell[7]);
 		if($player->getInventory()->contains($item)) {
-			$ev = new SellTransactionEvent($player, new Position($sell[0], $sell[1], $sell[2], $this->getServer()->getLevelByName($sell[3])), $item, $sell[8]);
-			$ev->call();
+			$ev = new SellTransactionEvent($player, new Position($sell[0], $sell[1], $sell[2], $this->getServer()->getWorldManager()->getWorldByName($sell[3])), $item, $sell[8]);
+			$this->getServer()->getPluginManager()->callEvent($ev);
 			if($ev->isCancelled()) {
 				$player->sendMessage($this->getMessage("failed-sell"));
 				return true;
 			}
 			$player->getInventory()->removeItem($item);
 			$player->sendMessage($this->getMessage("sold-item", [$sell[6], $sell[7], $sell[8]]));
-			EconomyAPI::getInstance()->addMoney($player, $sell[8]);
+			EconomyAPI::getInstance()->addMoney($player, $sell[8], null, null, true);
 		}else{
 			$player->sendMessage($this->getMessage("no-item", [$sell[6]]));
 		}

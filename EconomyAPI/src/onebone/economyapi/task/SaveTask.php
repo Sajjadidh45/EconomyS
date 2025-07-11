@@ -25,13 +25,13 @@ use pocketmine\scheduler\Task;
 
 class SaveTask extends Task {
 	/** @var EconomyAPI */
-	protected $plugin;
+	private EconomyAPI $plugin;
 
 	public function __construct(EconomyAPI $plugin) {
 		$this->plugin = $plugin;
 	}
 
-	public function onRun(int $currentTick) {
+	public function onRun(): void {
 		$this->plugin->saveAll();
 	}
 }
